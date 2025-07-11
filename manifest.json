@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Enhanced Test Automation Recorder",
+  "version": "1.0.0",
+  "description": "Advanced BDD Test Generation with Smart Features for Selenium automation",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Enhanced Test Automation Recorder"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "commands": {
+    "toggle-recorder": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+R"
+      },
+      "description": "Toggle test recorder"
+    },
+    "start-recording": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S"
+      },
+      "description": "Start recording"
+    },
+    "stop-recording": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+E"
+      },
+      "description": "Stop recording"
+    }
+  }
+}

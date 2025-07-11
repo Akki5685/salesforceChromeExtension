@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Automation Recorder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 300px;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #002f6c;
+            color: white;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .main-button {
+            width: 100%;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+            margin-bottom: 15px;
+        }
+
+        .main-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .main-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            line-height: 1.4;
+            margin-bottom: 15px;
+        }
+
+        .status {
+            text-align: center;
+            font-size: 11px;
+            opacity: 0.8;
+            margin-top: 10px;
+        }
+
+        .features {
+            font-size: 11px;
+            opacity: 0.9;
+        }
+
+        .features ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .features li {
+            padding: 2px 0;
+        }
+
+        .features li:before {
+            content: "✓ ";
+            font-weight: bold;
+        }
+
+        .error {
+            background: rgba(231, 76, 60, 0.2);
+            border: 1px solid rgba(231, 76, 60, 0.5);
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1> Salesforce Test Recorder</h1>
+        <p>Enhanced BDD Test Generation</p>
+    </div>
+
+    <button class="main-button" id="injectRecorder">
+        📦 Launch Recorder
+    </button>
+
+    <div class="info">
+        <strong>How to use:</strong><br>
+        1. Click "Launch Recorder" button<br>
+        2. Recorder panel will appear on the page<br>
+        3. Start recording and interact with elements<br>
+        4. Export generated test files
+    </div>
+
+    <div class="features">
+        <strong>Features:</strong>
+        <ul>
+            <li>Salesforce XPath generation</li>
+            <li>Element highlighting</li>
+            <li>Inline step editing</li>
+            <li>Display Xpaths while hover element</li>
+            <li>Auto waits detection</li>
+        </ul>
+    </div>
+
+    <div class="status" id="status">
+        Ready to inject recorder
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
