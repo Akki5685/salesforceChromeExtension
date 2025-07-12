@@ -99,8 +99,8 @@ function initializeCompleteRecorder() {
     const stableAttrs = this.filterAttributes(allAttrs);
 
     const strategies = [
-      () => this.labelBasedXPath(element),
       () => this.titleBasedXPath(element),
+      () => this.labelBasedXPath(element),
       () => this.nameBasedXPath(element, stableAttrs),
       () => this.textBasedXPath(element),
       () => this.attrBasedXPath(element, stableAttrs),
@@ -171,14 +171,27 @@ function initializeCompleteRecorder() {
     return null;
   },
 
-  titleBasedXPath(el) {
-    const title = el.title;
-    if (title) {
-      const tag = el.tagName.toLowerCase();
-      return `//${tag}[@title="${title}"]`;
+ titleBasedXPath(el) {
+  const title = el.getAttribute('title')?.trim();
+  if (title) {
+    const tag = el.tagName.toLowerCase();
+    
+    // Escape quotes for XPath
+    const escapedTitle = title.includes('"')
+      ? `concat("${title.split('"').join('", \'"\', "')}")`
+      : `"${title}"`;
+
+    const xpath = `//${tag}[@title=${escapedTitle}]`;
+
+    // Optional: Check uniqueness before returning (if desired)
+    const matches = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+    if (matches.snapshotLength === 1) {
+      return xpath;
     }
-    return null;
-  },
+  }
+  return null;
+}
+,
 
   nameBasedXPath(el, attrs) {
     if (attrs.name) {
@@ -300,25 +313,53 @@ textBasedXPath(el) {
     return this;
   },
 
-getLabelForElement(el) {
+ getLabelForElement(el) {
   if (!el) return null;
 
+  function buildShortXPath(fromEl, toEl) {
+    const tag = toEl.tagName.toLowerCase();
+    return `(//*[normalize-space(.)="${fromEl.textContent.trim()}"]/following::*//${tag})[1]`;
+  }
+
+  // Step 1: Find label using your traversal
   let current = el;
   let level = 0;
+  let labelEl = null;
 
   while (current && level < 20) {
     const sibling = current.previousElementSibling;
-    
     if (sibling && sibling.textContent.trim()) {
-      return sibling.textContent.trim();
+      labelEl = sibling;
+      break;
     }
-
     current = current.parentElement;
     level++;
   }
 
+  if (!labelEl) return null;
+
+  // Step 2: Scan container for value element
+  const container = labelEl.parentElement;
+  if (!container) return null;
+
+  const candidates = container.querySelectorAll("*");
+  for (const candidate of candidates) {
+    const valueText = candidate.textContent?.trim();
+    if (
+      valueText &&
+      valueText !== labelEl.textContent.trim() &&
+      !candidate.querySelector("*")
+    ) {
+      return {
+        label: labelEl.textContent.trim(),
+        xpathShort: buildShortXPath(labelEl, candidate)
+      };
+    }
+  }
+
   return null;
 }
+
 ,
 
  bindEvents() {
@@ -395,17 +436,36 @@ getValueByLabel(label) {
 
 altClickHandler(e) {
   if (!this.recorderState.isRecording || this._ignoreElement(e.target)) return;
-
-  if (!e.altKey) return; // Only proceed if Alt key is pressed
+  if (!e.altKey) return;
 
   e.preventDefault();
 
-  const label = this.getLabelForElement(e.target);
+  const labelInfo = this.getLabelForElement(e.target);
+  if (!labelInfo) {
+    console.warn("Label-value not found for:", e.target);
+    return;
+  }
+
+  const { label, xpathShort } = labelInfo;
   const value = e.target.textContent?.trim() || e.target.value || '';
 
-  this.recordInteraction(e.target, 'getText', label);
-  console.log('Alt+Click recorded label-value pair:', label, value);
-},
+  const step = {
+    id: ++this.recorderState.stepCounter,
+    xpath: xpathShort,  // already generated!
+    action: 'save',
+    data: label,
+    element: e.target.tagName,
+    timestamp: new Date().toISOString()
+  };
+
+  this.recorderState.steps.push(step);
+  this.ui.updateStepsDisplay();
+  this.ui.updateMiniStatus();
+  this.ui.statusBar.textContent = `🔴 Recording - ${this.recorderState.steps.length} steps captured`;
+
+  console.log('Alt+Click recorded label-value pair:', label, value, xpathShort);
+}
+,
 
   clickHandler(e) {
     if (!this.recorderState.isRecording || this._ignoreElement(e.target)) return;
@@ -440,31 +500,40 @@ altClickHandler(e) {
   },
 
   keyboardHandler(e) {
-    if (!this.recorderState.isRecording) return;
+  if (!this.recorderState.isRecording) return;
 
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      this.ui.pauseBtn.click();
-      setTimeout(() => this.ui.exportBtn.click(), 500);
-    }
+  const el = document.activeElement;
+  if (this._ignoreElement(el)) return;
 
-    // Shortcuts for getText (Ctrl+G) and verify (Ctrl+V)
-    if (e.ctrlKey && e.key.toLowerCase() === 'g') {
-      const el = document.activeElement;
-      if (!this._ignoreElement(el)) {
-        const text = el.textContent?.trim();
-        this.recordInteraction(el, 'getText', text || '');
-      }
-    }
+  // Escape = pause + export
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    this.ui.pauseBtn.click();
+    setTimeout(() => this.ui.exportBtn.click(), 500);
+    return;
+  }
 
-    if (e.ctrlKey && e.key.toLowerCase() === 'v') {
-      const el = document.activeElement;
-      if (!this._ignoreElement(el)) {
-        const value = el.value || el.textContent?.trim() || '';
-        this.recordInteraction(el, 'verify', value);
-      }
-    }
-  },
+ 
+  // Ctrl + V = verify
+  if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+    const value = el.value || el.textContent?.trim() || '';
+    this.recordInteraction(el, 'verify', value);
+    return;
+  }
+
+  // Tab = tab action
+  if (e.key === 'Tab') {
+    this.recordInteraction(el, 'tab');
+    return; // optional: let browser proceed with tabbing
+  }
+
+  // Enter = pressEnter action
+  if (e.key === 'Enter') {
+    this.recordInteraction(el, 'pressEnter');
+    return;
+  }
+}
+,
 
   recordInteraction(element, action, data = '') {
   try {
@@ -1330,5 +1399,3 @@ function handleInjectionError(error, statusDiv, injectButton, originalText) {
   injectButton.textContent = originalText;
   injectButton.disabled = false;
 }
-
-
