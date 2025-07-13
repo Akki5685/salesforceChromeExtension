@@ -1,4 +1,4 @@
-// popup.js - Complete working version with all functions
+// popup.js - Complete working version with proper pause/resume functionality
 document.addEventListener('DOMContentLoaded', function() {
   console.log('Enhanced Test Recorder popup loaded');
 
@@ -74,19 +74,49 @@ function initializeCompleteRecorder() {
     console.log('Removed existing recorder');
   }
   
-  // Initialize global state
-  window.recorderState = {
-    isRecording: false,
-    steps: [],
-    stepCounter: 0,
-    isMinimized: false,
-    features: {
-      highlight: true,
-      xpathPreview: true,
-      smartWait: true,
-      salesforce: true
+  // Initialize global state with persistence check
+  if (!window.recorderState) {
+    // Try to restore from sessionStorage
+    const savedState = sessionStorage.getItem('testRecorderState');
+    if (savedState) {
+      try {
+        window.recorderState = JSON.parse(savedState);
+        console.log('📥 Restored state from session storage:', window.recorderState);
+      } catch (e) {
+        console.warn('Failed to restore saved state:', e);
+        window.recorderState = createDefaultState();
+      }
+    } else {
+      window.recorderState = createDefaultState();
     }
-  };
+  }
+  
+  function createDefaultState() {
+    return {
+      isRecording: false,
+      isPaused: false,
+      sessionStarted: false,
+      steps: [],
+      stepCounter: 0,
+      isMinimized: false,
+      features: {
+        highlight: true,
+        xpathPreview: true,
+        smartWait: true,
+        salesforce: true
+      }
+    };
+  }
+  
+  // Auto-save state function
+  function saveState() {
+    try {
+      sessionStorage.setItem('testRecorderState', JSON.stringify(window.recorderState));
+      console.log('💾 State saved to session storage');
+    } catch (e) {
+      console.warn('Failed to save state:', e);
+    }
+  }
   
   // Complete inline modules
   const RecorderModules = {
@@ -102,6 +132,7 @@ function initializeCompleteRecorder() {
       () => this.titleBasedXPath(element),
       () => this.labelBasedXPath(element),
       () => this.nameBasedXPath(element, stableAttrs),
+      () => this.idBasedXPath(element),
       () => this.textBasedXPath(element),
       () => this.attrBasedXPath(element, stableAttrs),
       () => this.salesforceXPath(element, stableAttrs),
@@ -186,6 +217,22 @@ function initializeCompleteRecorder() {
     }
     return null;
   },
+
+
+idBasedXPath(el) {
+ if (el.id) {
+  const matchingNode = Array.from(document.querySelectorAll(`[for="${el.id}"]`))
+    .find(el => el.textContent?.trim());
+
+  const labelText = matchingNode?.textContent?.trim();
+
+  if (labelText) {
+    return `//${el.tagName.toLowerCase()}[@id=//*[normalize-space(text())="${labelText}"]/@for]`;
+  }
+}
+},
+
+
 
 textBasedXPath(el) {
   if (!el || el.children.length > 0) return null;
@@ -290,128 +337,123 @@ textBasedXPath(el) {
 },
 
     
-   ActionsHandler : {
+ ActionsHandler: {
   init(recorderState, ui) {
     this.recorderState = recorderState;
     this.ui = ui;
     this.inputTimers = new Map();
+    
     this.bindEvents();
     console.log('ActionsHandler initialized');
     return this;
   },
 
- getLabelForElement(el) {
-  if (!el) return null;
+  getLabelForElement(el) {
+    if (!el) return null;
 
-  function buildShortXPath(fromEl, toEl) {
-    const tag = toEl.tagName.toLowerCase();
-    return `(//*[normalize-space(.)="${fromEl.textContent.trim()}"]/following::*//${tag})[1]`;
-  }
-
-  // Step 1: Find label using your traversal
-  let current = el;
-  let level = 0;
-  let labelEl = null;
-
-  while (current && level < 20) {
-    const sibling = current.previousElementSibling;
-    if (sibling && sibling.textContent.trim()) {
-      labelEl = sibling;
-      break;
+    function buildShortXPath(fromEl, toEl) {
+      const tag = toEl.tagName.toLowerCase();
+      return `(//*[normalize-space(.)="${fromEl.textContent.trim()}"]/following::*//${tag})[1]`;
     }
-    current = current.parentElement;
-    level++;
-  }
 
-  if (!labelEl) return null;
+    // Step 1: Find label using your traversal
+    let current = el;
+    let level = 0;
+    let labelEl = null;
 
-  // Step 2: Scan container for value element
-  const container = labelEl.parentElement;
-  if (!container) return null;
-
-  const candidates = container.querySelectorAll("*");
-  for (const candidate of candidates) {
-    const valueText = candidate.textContent?.trim();
-    if (
-      valueText &&
-      valueText !== labelEl.textContent.trim() &&
-      !candidate.querySelector("*")
-    ) {
-      return {
-        label: labelEl.textContent.trim(),
-        xpathShort: buildShortXPath(labelEl, candidate)
-      };
+    while (current && level < 20) {
+      const sibling = current.previousElementSibling;
+      if (sibling && sibling.textContent.trim()) {
+        labelEl = sibling;
+        break;
+      }
+      current = current.parentElement;
+      level++;
     }
-  }
 
-  return null;
-}
+    if (!labelEl) return null;
 
-,
+    // Step 2: Scan container for value element
+    const container = labelEl.parentElement;
+    if (!container) return null;
 
- bindEvents() {
-  this.mouseoverHandler = this.mouseoverHandler.bind(this);
-  this.mouseoutHandler = this.mouseoutHandler.bind(this);
-  this.clickHandler = this.clickHandler.bind(this);
-  this.inputHandler = this.inputHandler.bind(this);
-  this.keyboardHandler = this.keyboardHandler.bind(this);
-  this.altClickHandler = this.altClickHandler.bind(this);
+    const candidates = container.querySelectorAll("*");
+    for (const candidate of candidates) {
+      const valueText = candidate.textContent?.trim();
+      if (
+        valueText &&
+        valueText !== labelEl.textContent.trim() &&
+        !candidate.querySelector("*")
+      ) {
+        return {
+          label: labelEl.textContent.trim(),
+          xpathShort: buildShortXPath(labelEl, candidate)
+        };
+      }
+    }
 
-  document.addEventListener('mouseover', this.mouseoverHandler, true);
-  document.addEventListener('mouseout', this.mouseoutHandler, true);
-    document.addEventListener('click', this.altClickHandler, true); // First: Alt+Click
-  document.addEventListener('click', this.clickHandler, true);
-  document.addEventListener('input', this.inputHandler, true);
-  document.addEventListener('keydown', this.keyboardHandler, true);
-}
-,
+    return null;
+  },
+
+  bindEvents() {
+    this.mouseoverHandler = this.mouseoverHandler.bind(this);
+    this.mouseoutHandler = this.mouseoutHandler.bind(this);
+    this.clickHandler = this.clickHandler.bind(this);
+    this.inputHandler = this.inputHandler.bind(this);
+    this.keyboardHandler = this.keyboardHandler.bind(this);
+    this.altClickHandler = this.altClickHandler.bind(this);
+
+    document.addEventListener('mouseover', this.mouseoverHandler, true);
+    document.addEventListener('mouseout', this.mouseoutHandler, true);
+    document.addEventListener('click', this.altClickHandler, true);
+    document.addEventListener('click', this.clickHandler, true);
+    document.addEventListener('input', this.inputHandler, true);
+    document.addEventListener('keydown', this.keyboardHandler, true);
+  },
 
   removeEvents() {
-  document.removeEventListener('mouseover', this.mouseoverHandler, true);
-  document.removeEventListener('mouseout', this.mouseoutHandler, true);
-  document.removeEventListener('click', this.altClickHandler, true); // First: Alt+Click
-  document.removeEventListener('click', this.clickHandler, true);
-  document.removeEventListener('input', this.inputHandler, true);
-  document.removeEventListener('keydown', this.keyboardHandler, true);
+    document.removeEventListener('mouseover', this.mouseoverHandler, true);
+    document.removeEventListener('mouseout', this.mouseoutHandler, true);
+    document.removeEventListener('click', this.altClickHandler, true);
+    document.removeEventListener('click', this.clickHandler, true);
+    document.removeEventListener('input', this.inputHandler, true);
+    document.removeEventListener('keydown', this.keyboardHandler, true);
 
-  this.inputTimers.forEach(timer => clearTimeout(timer));
-  this.inputTimers.clear();
-  console.log('Event listeners removed');
-}
-,
+    this.inputTimers.forEach(timer => clearTimeout(timer));
+    this.inputTimers.clear();
+    console.log('Event listeners removed');
+  },
 
-getValueByLabel(label) {
-  if (!el) return null;
+  getValueByLabel(el) {
+    if (!el) return null;
 
-  const parent = el.parentElement;
-  if (!parent) return null;
+    const parent = el.parentElement;
+    if (!parent) return null;
 
-  const siblings = Array.from(parent.children);
-  for (const sibling of siblings) {
-    if (sibling === el) continue;
+    const siblings = Array.from(parent.children);
+    for (const sibling of siblings) {
+      if (sibling === el) continue;
 
-    const text = sibling.textContent?.trim();
-    const hasTitle = sibling.hasAttribute('title');
+      const text = sibling.textContent?.trim();
+      const hasTitle = sibling.hasAttribute('title');
 
-    if (text && text.length <= 50 && (hasTitle || /^[A-Za-z\s]+$/.test(text))) {
-      return text;
+      if (text && text.length <= 50 && (hasTitle || /^[A-Za-z\s]+$/.test(text))) {
+        return text;
+      }
+
+      const nested = sibling.querySelector('p[title], span');
+      if (nested && nested.textContent.trim()) {
+        return nested.textContent.trim();
+      }
     }
 
-    // Handle deeply nested <span> or <p> inside sibling
-    const nested = sibling.querySelector('p[title], span');
-    if (nested && nested.textContent.trim()) {
-      return nested.textContent.trim();
-    }
-  }
-
-  return null;
-},
-
+    return null;
+  },
 
   mouseoverHandler(e) {
-    if (!this.recorderState.features.highlight || this._ignoreElement(e.target)) return;
+    if (!window.recorderState?.features?.highlight || this._ignoreElement(e.target)) return;
     this.showHighlight(e.target);
-    if (this.recorderState.features.xpathPreview) this.showElementInfo(e.target);
+    if (window.recorderState?.features?.xpathPreview) this.showElementInfo(e.target);
   },
 
   mouseoutHandler() {
@@ -419,50 +461,79 @@ getValueByLabel(label) {
     this.hideElementInfo();
   },
 
+  altClickHandler(e) {
+    console.log('Alt+Click event - checking recording state:', {
+      isRecording: window.recorderState?.isRecording,
+      isPaused: window.recorderState?.isPaused,
+      altKey: e.altKey,
+      ignored: this._ignoreElement(e.target)
+    });
 
+    // Must be actively recording (not paused) AND Alt key pressed AND not ignored element
+    if (!window.recorderState?.isRecording || window.recorderState?.isPaused || !e.altKey || this._ignoreElement(e.target)) {
+      console.log('❌ Alt+Click ignored - not recording, paused, no alt key, or element ignored');
+      return;
+    }
 
-altClickHandler(e) {
-  if (!this.recorderState.isRecording || this._ignoreElement(e.target)) return;
-  if (!e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
 
-  e.preventDefault();
+    const labelInfo = this.getLabelForElement(e.target);
+    if (!labelInfo) {
+      console.warn("Label-value not found for:", e.target);
+      return;
+    }
 
-  const labelInfo = this.getLabelForElement(e.target);
-  if (!labelInfo) {
-    console.warn("Label-value not found for:", e.target);
-    return;
-  }
+    const { label, xpathShort } = labelInfo;
+    const value = e.target.textContent?.trim() || e.target.value || '';
 
-  const { label, xpathShort } = labelInfo;
-  const value = e.target.textContent?.trim() || e.target.value || '';
+    const step = {
+      id: ++window.recorderState.stepCounter,
+      xpath: xpathShort,
+      action: 'save',
+      data: label,
+      element: e.target.tagName,
+      timestamp: new Date().toISOString()
+    };
 
-  const step = {
-    id: ++this.recorderState.stepCounter,
-    xpath: xpathShort,  // already generated!
-    action: 'save',
-    data: label,
-    element: e.target.tagName,
-    timestamp: new Date().toISOString()
-  };
+    window.recorderState.steps.push(step);
+    saveState();
+    this.ui.updateStepsDisplay();
+    this.ui.updateMiniStatus();
+    this.ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured`;
 
-  this.recorderState.steps.push(step);
-  this.ui.updateStepsDisplay();
-  this.ui.updateMiniStatus();
-  this.ui.statusBar.textContent = `🔴 Recording - ${this.recorderState.steps.length} steps captured`;
-
-  console.log('Alt+Click recorded label-value pair:', label, value, xpathShort);
-}
-,
+    console.log('✅ Alt+Click recorded step:', step);
+  },
 
   clickHandler(e) {
-    if (!this.recorderState.isRecording || this._ignoreElement(e.target)) return;
-    e.preventDefault(); // prevent navigation for anchor tags
-    console.log('Recording click on:', e.target);
+    console.log('Click event - checking recording state:', {
+      isRecording: window.recorderState?.isRecording,
+      isPaused: window.recorderState?.isPaused,
+      element: e.target.tagName,
+      ignored: this._ignoreElement(e.target)
+    });
+
+    // Must be actively recording (not paused) AND not ignored element
+    if (!window.recorderState?.isRecording || window.recorderState?.isPaused || this._ignoreElement(e.target)) {
+      console.log('❌ Click ignored - not recording or element ignored');
+      return;
+    }
+    
+    e.preventDefault();
+    console.log('✅ Recording click on:', e.target);
     this.recordInteraction(e.target, 'click', '');
   },
 
   inputHandler(e) {
-    if (!this.recorderState.isRecording || this._ignoreElement(e.target)) return;
+    console.log('Input event - checking recording state:', {
+      isRecording: window.recorderState?.isRecording,
+      isPaused: window.recorderState?.isPaused,
+      value: e.target.value
+    });
+
+    // Must be actively recording (not paused)
+    if (!window.recorderState?.isRecording || window.recorderState?.isPaused || this._ignoreElement(e.target)) return;
+    
     const el = e.target;
     const value = el.value;
 
@@ -470,16 +541,20 @@ altClickHandler(e) {
 
     const timer = setTimeout(() => {
       const xpath = RecorderModules.XPathGenerator.generateXPath(el);
-      const existing = this.recorderState.steps.findIndex(
+      const existing = window.recorderState.steps.findIndex(
         s => s.xpath === xpath && s.action === 'sendKeys'
       );
 
       if (existing !== -1) {
-        this.recorderState.steps[existing].data = value;
-        this.recorderState.steps[existing].timestamp = new Date().toISOString();
+        window.recorderState.steps[existing].data = value;
+        window.recorderState.steps[existing].timestamp = new Date().toISOString();
+        console.log('Updated existing sendKeys step');
       } else {
         this.recordInteraction(el, 'sendKeys', value);
       }
+      
+      saveState();
+      this.ui.updateStepsDisplay();
       this.inputTimers.delete(el);
     }, 1000);
 
@@ -487,64 +562,182 @@ altClickHandler(e) {
   },
 
   keyboardHandler(e) {
-  if (!this.recorderState.isRecording) return;
 
-  const el = document.activeElement;
-  if (this._ignoreElement(el)) return;
-
-  // Escape = pause + export
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    this.ui.pauseBtn.click();
-    setTimeout(() => this.ui.exportBtn.click(), 500);
-    return;
-  }
-
- 
-  // Ctrl + V = verify
-  if (e.ctrlKey && e.key.toLowerCase() === 'v') {
-    const value = el.value || el.textContent?.trim() || '';
-    this.recordInteraction(el, 'verify', value);
-    return;
-  }
-
-  // Tab = tab action
-  if (e.key === 'Tab') {
-    this.recordInteraction(el, 'tab');
-    return; // optional: let browser proceed with tabbing
-  }
-
-  // Enter = pressEnter action
-  if (e.key === 'Enter') {
-    this.recordInteraction(el, 'pressEnter');
-    return;
-  }
+// Escape key works regardless of recording state
+if (e.key === 'Escape') {
+  e.preventDefault();
+  console.log('🔄 Escape pressed - handling escape key');
+  
+  const handleEscape = async () => {
+    try {
+      // If we have steps, export them first
+      if (window.recorderState.steps.length > 0) {
+        console.log(`📦 Exporting ${window.recorderState.steps.length} steps before reset...`);
+        
+        // Get the export handler
+        const exportHandler = RecorderModules.ExportHandler;
+        if (!exportHandler) {
+          console.error('ExportHandler not found in RecorderModules');
+          return;
+        }
+        
+        // Make sure we have UI context
+        const ui = this.ui || window.recorderUI; // Fallback to global UI if needed
+        if (!ui) {
+          console.error('UI context not available for export');
+          return;
+        }
+        
+        // Initialize export handler
+        exportHandler.init(window.recorderState, ui);
+        
+        // Create a promise that resolves when export is complete
+        await new Promise((resolve, reject) => {
+          try {
+            // Check if exportFiles returns a promise
+            const exportResult = exportHandler.exportFiles();
+            
+            if (exportResult && typeof exportResult.then === 'function') {
+              // If it's a promise, wait for it
+              exportResult
+                .then(() => {
+                  console.log('✅ Export completed successfully');
+                  resolve();
+                })
+                .catch(reject);
+            } else {
+              // If it's synchronous, give it time to complete DOM operations
+              setTimeout(() => {
+                console.log('✅ Export completed (synchronous)');
+                resolve();
+              }, 1500); // Increased timeout
+            }
+          } catch (error) {
+            reject(error);
+          }
+        });
+        
+        console.log('📦 Export process finished');
+        
+      } else {
+        console.log('ℹ️ No steps to export');
+      }
+      
+    } catch (error) {
+      console.error('❌ Export failed during escape:', error);
+      // Continue with reset even if export fails
+    }
+    
+    // Reset the recorder state
+    console.log('🔄 Resetting recorder state...');
+    window.recorderState = createDefaultState();
+    
+    // Save the reset state
+    if (typeof saveState === 'function') {
+      saveState();
+    }
+    
+    // Update UI to reset state
+    const ui = this.ui || window.recorderUI;
+    if (ui) {
+      try {
+        ui.startBtn.disabled = false;
+        ui.startBtn.style.opacity = '1';
+        ui.startBtn.textContent = '🔴 Start';
+        
+        ui.pauseBtn.disabled = true;
+        ui.pauseBtn.style.opacity = '0.6';
+        ui.pauseBtn.textContent = '⏸️ Pause';
+        
+        ui.exportBtn.disabled = true;
+        ui.exportBtn.style.opacity = '0.6';
+        ui.statusBar.style.background = '#f8f9fa';
+        ui.statusBar.style.color = '#495057';
+        ui.statusBar.textContent = window.recorderState.steps.length > 0 ? 
+          '🔄 Reset after export' : '🔄 Recorder reset';
+        
+        // Update displays if methods exist
+        if (typeof ui.updateStepsDisplay === 'function') {
+          ui.updateStepsDisplay();
+        }
+        if (typeof ui.updateMiniStatus === 'function') {
+          ui.updateMiniStatus();
+        }
+        
+        console.log('✅ UI updated successfully');
+        
+      } catch (uiError) {
+        console.error('❌ UI update failed:', uiError);
+      }
+    } else {
+      console.warn('⚠️ UI not available for reset');
+    }
+  };
+  
+  // Call the async handler
+  handleEscape();
+  return;
 }
-,
+    // Other keyboard shortcuts only work when actively recording
+    if (!window.recorderState?.isRecording || window.recorderState?.isPaused) return;
+
+    const el = document.activeElement;
+    if (this._ignoreElement(el)) return;
+
+    // Ctrl + V = verify
+    if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+      const value = el.value || el.textContent?.trim() || '';
+      this.recordInteraction(el, 'verify', value);
+      return;
+    }
+
+    // Tab = tab action
+    if (e.key === 'Tab') {
+      this.recordInteraction(el, 'tab');
+      return;
+    }
+
+    // Enter = pressEnter action
+    if (e.key === 'Enter') {
+      this.recordInteraction(el, 'pressEnter');
+      return;
+    }
+  },
 
   recordInteraction(element, action, data = '') {
-  try {
-    const xpath = RecorderModules.XPathGenerator.generateXPath(element);
-    const step = {
-      id: ++this.recorderState.stepCounter,
-      xpath,
-      action,
-      data,
-      element: element.tagName,
-      timestamp: new Date().toISOString()
-    };
+    try {
+      console.log(`🎯 Recording ${action} interaction:`, {
+        element: element.tagName,
+        data: data,
+        currentSteps: window.recorderState.steps.length,
+        isRecording: window.recorderState.isRecording,
+        isPaused: window.recorderState.isPaused
+      });
 
-    this.recorderState.steps.push(step);
-    this.ui.updateStepsDisplay();
-    this.ui.updateMiniStatus();
+      const xpath = RecorderModules.XPathGenerator.generateXPath(element);
+      const step = {
+        id: ++window.recorderState.stepCounter,
+        xpath,
+        action,
+        data,
+        element: element.tagName,
+        timestamp: new Date().toISOString()
+      };
 
-    this.ui.statusBar.textContent = `🔴 Recording - ${this.recorderState.steps.length} steps captured`;
-    console.log('Recorded step:', step);
-  } catch (err) {
-    console.error('Failed to record step:', err);
-  }
-}
-,
+      window.recorderState.steps.push(step);
+      saveState();
+
+      console.log(`✅ Successfully recorded step ${step.id}:`, step);
+      console.log(`📊 Total steps now: ${window.recorderState.steps.length}`);
+
+      this.ui.updateStepsDisplay();
+      this.ui.updateMiniStatus();
+      this.ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured`;
+
+    } catch (err) {
+      console.error('❌ Failed to record step:', err);
+    }
+  },
 
   showHighlight(el) {
     const rect = el.getBoundingClientRect();
@@ -576,6 +769,7 @@ altClickHandler(e) {
         <strong>XPath:</strong> <span style="font-family: monospace; font-size: 10px;">${xpath}</span><br>
         ${el.id ? `<strong>ID:</strong> ${el.id}<br>` : ''}
         ${el.className ? `<strong>Class:</strong> ${el.className.split(' ').slice(0, 2).join(' ')}<br>` : ''}
+        <strong>State:</strong> ${window.recorderState?.isRecording ? (window.recorderState?.isPaused ? '⏸️ Paused' : '🔴 Recording') : '⏹️ Stopped'}
       `;
 
       Object.assign(info.style, {
@@ -592,45 +786,43 @@ altClickHandler(e) {
   },
 
   _ignoreElement(el) {
-    return el.closest('#enhanced-test-recorder-container');
+    // Check if element is part of the recorder UI
+    const isRecorderElement = el.closest('#enhanced-test-recorder-container');
+    
+    if (isRecorderElement) {
+      console.log('🚫 Ignoring recorder UI element:', el.tagName, el.id || el.className);
+    }
+    
+    return isRecorderElement;
   }
 },
     
-   ExportHandler: {
+ ExportHandler: {
   init(recorderState, ui) {
     this.recorderState = recorderState;
     this.ui = ui;
     console.log('ExportHandler initialized');
-    console.log('Initial recorder state:', this.recorderState);
     return this;
   },
   
   async exportFiles() {
-    // Enhanced debugging for the export issue
-    console.log('🔍 Export triggered - debugging recorder state...');
-    console.log('Recorder state object:', this.recorderState);
-    console.log('Steps array:', this.recorderState?.steps);
-    console.log('Steps length:', this.recorderState?.steps?.length);
-    console.log('Window recorder state:', window.recorderState);
+    console.log('🔍 Export triggered - checking steps...');
+    console.log('Current steps:', window.recorderState?.steps?.length);
     
-    // Check if we have steps in either location
-    const steps = this.recorderState?.steps || window.recorderState?.steps || [];
-    console.log('Resolved steps:', steps);
+    const steps = window.recorderState?.steps || [];
     
     if (steps.length === 0) {
-      // Enhanced error message with debugging info
       const debugInfo = `
 Debug Information:
-- Recorder State Exists: ${!!this.recorderState}
-- Steps Array Exists: ${!!this.recorderState?.steps}
-- Steps Length: ${this.recorderState?.steps?.length || 0}
-- Window State Steps: ${window.recorderState?.steps?.length || 0}
-- Is Recording: ${this.recorderState?.isRecording || window.recorderState?.isRecording}
+- Steps Length: ${steps.length}
+- Is Recording: ${window.recorderState?.isRecording}
+- Is Paused: ${window.recorderState?.isPaused}
+- Session Started: ${window.recorderState?.sessionStarted}
 
 Please try:
 1. Start recording by clicking the "Start" button
 2. Interact with some elements on the page
-3. Pause recording
+3. You can pause and resume recording (steps will be preserved)
 4. Then try exporting again
       `;
       
@@ -642,14 +834,12 @@ Please try:
     try {
       this.updateStatus('⏳ Generating files...', '#d1ecf1', '#0c5460');
       
-      // Use the resolved steps array
       console.log(`📝 Generating files for ${steps.length} steps...`);
       
       const pageElements = this.generatePageElements(steps);
       const stepDefinitions = this.generateStepDefinitions(steps);
       const featureFile = this.generateFeatureFile(steps);
       
-      // Log generated content length for debugging
       console.log('Generated files:', {
         pageElements: pageElements.length + ' chars',
         stepDefinitions: stepDefinitions.length + ' chars', 
@@ -677,32 +867,28 @@ Please try:
       this.ui.statusBar.style.background = bgColor;
       this.ui.statusBar.style.color = textColor;
       this.ui.statusBar.textContent = message;
-    } else {
-      console.warn('Status bar not found, message:', message);
     }
   },
   
-  generatePageElements(steps = null) {
-    // Use provided steps or fall back to instance steps
-    const stepsToUse = steps || this.recorderState?.steps || window.recorderState?.steps || [];
-    console.log(`Generating PageElements for ${stepsToUse.length} steps`);
-    
+  generatePageElements(steps) {
     const elementMap = new Map();
-    stepsToUse.forEach(step => {
-      const elementName = this.generateElementName(step);
-      elementMap.set(elementName, step.xpath);
-      console.log(`Added element: ${elementName} -> ${step.xpath}`);
+    steps.forEach(step => {
+      if (step.xpath) {
+        const elementName = this.generateElementName(step);
+        elementMap.set(elementName, step.xpath);
+      }
     });
 
     let javaCode = `package pageObjects;
 
-import org.openqa.selenium.By;
+import com.codeborne.selenide.SelenideElement;
+import static com.codeborne.selenide.Selenide.$x;
 
 /**
- * Page Elements - Generated by Enhanced Test Automation Recorder
+ * Page Elements - Generated by Enhanced Test Automation Recorder (Selenide)
  * Generated on: ${new Date().toISOString()}
  * Total elements: ${elementMap.size}
- * Total steps: ${stepsToUse.length}
+ * Total steps: ${steps.length}
  */
 public class PageElements {
     
@@ -710,80 +896,83 @@ public class PageElements {
     
     elementMap.forEach((xpath, elementName) => {
       javaCode += `    /** XPath: ${xpath} */\n`;
-      javaCode += `    public static final By ${elementName} = By.xpath("${xpath}");\n\n`;
+      javaCode += `    public static final SelenideElement ${elementName} = $x("${xpath}");\n\n`;
     });
     
     javaCode += `}`;
-    console.log('Generated PageElements.java:', javaCode.length + ' characters');
     return javaCode;
   },
   
-  generateStepDefinitions(steps = null) {
-    const stepsToUse = steps || this.recorderState?.steps || window.recorderState?.steps || [];
-    console.log(`Generating StepDefinitions for ${stepsToUse.length} steps`);
-    
+  generateStepDefinitions(steps) {
     const stepMethods = new Set();
-    stepsToUse.forEach(step => {
-      const methodName = this.generateMethodName(step);
-      const stepDef = this.generateStepDefinition(step, methodName);
-      stepMethods.add(stepDef);
-      console.log(`Added step method: ${methodName}`);
+    steps.forEach(step => {
+      if (step.action && step.xpath) {
+        const methodName = this.generateMethodName(step);
+        const stepDef = this.generateStepDefinition(step, methodName);
+        stepMethods.add(stepDef);
+      }
     });
 
     let javaCode = `package stepDefinitions;
 
 import io.cucumber.java.en.*;
-import com.codeborne.selenide.SelenideElement;
+import com.codeborne.selenide.*;
 import static com.codeborne.selenide.Condition.*;
 import static com.codeborne.selenide.Selenide.*;
 import pageObjects.PageElements;
-
+import java.time.Duration;
 
 /**
- * Step Definitions - Generated by Enhanced Test Automation Recorder
+ * Step Definitions - Generated by Enhanced Test Automation Recorder (Selenide)
  * Generated on: ${new Date().toISOString()}
- * Total steps: ${stepsToUse.length}
+ * Total steps: ${steps.length}
  * Total methods: ${stepMethods.size}
  */
 public class StepDefinitions {
+
+    public StepDefinitions() {
+        Configuration.timeout = 10000;
+        Configuration.collectionsTimeout = 10000;
+        Configuration.fastSetValue = true;
+    }
 
 `;
         stepMethods.forEach(method => {
           javaCode += method + '\n';
         });
         javaCode += `}`;
-        console.log('Generated StepDefinitions.java:', javaCode.length + ' characters');
         return javaCode;
       },
 
-
-  
-  generateFeatureFile(steps = null) {
-    const stepsToUse = steps || this.recorderState?.steps || window.recorderState?.steps || [];
+  generateFeatureFile(steps) {
     const stepText = this.ui?.stepTextArea?.value || 'UI Automation Test';
     
-    console.log(`Generating FeatureFile for ${stepsToUse.length} steps`);
-    
-    const featureFile = `@UITest @Regression
+    const featureFile = `@UITest @Regression @Selenide
 Feature: Recorded user interactions
+
+  @SmokeTest
   Scenario: ${stepText}
     Given user is on the target page
-${stepsToUse.map(step => `    When ${this.generateStepDescription(step)}`).join('\n')}
-    Then the operation should complete successfully
+${steps.filter(step => step.action && step.xpath).map(step => `    When ${this.generateStepDescription(step)}`).join('\n')}
+
+  @DataDriven  
+  Scenario Outline: Data-driven test execution
+    Given user is on the target page
+    When user performs the recorded actions with "<testData>"
+    Then the expected result "<expectedResult>" should be displayed
     
     Examples:
       | testData | 
       | data1    | 
+
+# Generated from ${steps.length} recorded steps
+# Generated on: ${new Date().toISOString()}
 `;
     
-    console.log('Generated UITest.feature:', featureFile.length + ' characters');
     return featureFile;
   },
   
   generateElementName(step) {
-    console.log('Generating element name for step:', step);
-    
-    // Enhanced element name generation with more patterns
     const patterns = [
       { regex: /@data-field-label="([^"]+)"/, suffix: 'Field', priority: 1 },
       { regex: /@placeholder="([^"]+)"/, suffix: 'Field', priority: 2 },
@@ -794,95 +983,101 @@ ${stepsToUse.map(step => `    When ${this.generateStepDescription(step)}`).join(
       { regex: /@data-testid="([^"]+)"/, suffix: 'Element', priority: 7 }
     ];
     
-    // Sort by priority and try each pattern
     patterns.sort((a, b) => a.priority - b.priority);
     
     for (const pattern of patterns) {
-      const match = step.xpath.match(pattern.regex);
+      const match = step.xpath?.match(pattern.regex);
       if (match && match[1]) {
         const elementName = this.toCamelCase(match[1]) + pattern.suffix;
-        console.log(`Generated element name: ${elementName} from ${pattern.regex}`);
         return elementName;
       }
     }
     
-    // Fallback to step-based naming
-    const fallbackName = `element${step.id}`;
-    console.log(`Using fallback element name: ${fallbackName}`);
-    return fallbackName;
+    return `element${step.id}`;
   },
   
   generateMethodName(step) {
     const elementName = this.generateElementName(step);
-    const methodName = `user_${step.action}_${elementName}`;
-    console.log(`Generated method name: ${methodName}`);
-    return methodName;
+    return `user_${step.action}_${elementName}`;
   },
   
- generateStepDefinition(step, methodName) {
-  const elementName = this.generateElementName(step);
+  generateStepDefinition(step, methodName) {
+    const elementName = this.generateElementName(step);
 
-  const templates = {
-    click: {
-      annotation: `@When("User clicks on ${elementName}")`,
-      signature: `public void ${methodName}()`,
-      body: `        PageElements.${elementName}.shouldBe(visible).click();
+    const templates = {
+      click: {
+        annotation: `@When("User clicks on ${elementName}")`,
+        signature: `public void ${methodName}()`,
+        body: `        PageElements.${elementName}.shouldBe(visible, enabled).click();
         System.out.println("✅ Clicked on ${elementName}");`
-    },
-    sendKeys: {
-      annotation: `@When("User enters {string} in ${elementName}")`,
-      signature: `public void ${methodName}(String text)`,
-      body: `        PageElements.${elementName}.shouldBe(visible).setValue(text);
+      },
+      sendKeys: {
+        annotation: `@When("User enters {string} in ${elementName}")`,
+        signature: `public void ${methodName}(String text)`,
+        body: `        PageElements.${elementName}.shouldBe(visible, enabled).setValue(text);
         System.out.println("✅ Entered text '" + text + "' in ${elementName}");`
-    },
-    clear: {
-      annotation: `@When("User clears ${elementName}")`,
-      signature: `public void ${methodName}()`,
-      body: `        PageElements.${elementName}.shouldBe(visible).clear();
+      },
+      type: {
+        annotation: `@When("User types {string} in ${elementName}")`,
+        signature: `public void ${methodName}(String text)`,
+        body: `        PageElements.${elementName}.shouldBe(visible, enabled).setValue(text);
+        System.out.println("✅ Typed text '" + text + "' in ${elementName}");`
+      },
+      clear: {
+        annotation: `@When("User clears ${elementName}")`,
+        signature: `public void ${methodName}()`,
+        body: `        PageElements.${elementName}.shouldBe(visible, enabled).clear();
         System.out.println("✅ Cleared ${elementName}");`
-    },
-    hover: {
-      annotation: `@When("User hovers over ${elementName}")`,
-      signature: `public void ${methodName}()`,
-      body: `        PageElements.${elementName}.shouldBe(visible).hover();
+      },
+      hover: {
+        annotation: `@When("User hovers over ${elementName}")`,
+        signature: `public void ${methodName}()`,
+        body: `        PageElements.${elementName}.shouldBe(visible).hover();
         System.out.println("✅ Hovered over ${elementName}");`
-    },
-    doubleClick: {
-      annotation: `@When("User double clicks on ${elementName}")`,
-      signature: `public void ${methodName}()`,
-      body: `        actions().doubleClick(PageElements.${elementName}.shouldBe(visible)).perform();
+      },
+      doubleClick: {
+        annotation: `@When("User double clicks on ${elementName}")`,
+        signature: `public void ${methodName}()`,
+        body: `        PageElements.${elementName}.shouldBe(visible, enabled).doubleClick();
         System.out.println("✅ Double-clicked on ${elementName}");`
-    }
-  };
-  const template = templates[step.action] || {
-    annotation: `@When("User performs ${step.action} on ${elementName}")`,
-    signature: `public void ${methodName}()`,
-    body: `        // TODO: Implement '${step.action}' for ${elementName}
+      },
+      rightClick: {
+        annotation: `@When("User right clicks on ${elementName}")`,
+        signature: `public void ${methodName}()`,
+        body: `        PageElements.${elementName}.shouldBe(visible, enabled).contextClick();
+        System.out.println("✅ Right-clicked on ${elementName}");`
+      }
+    };
+    
+    const template = templates[step.action] || {
+      annotation: `@When("User performs ${step.action} on ${elementName}")`,
+      signature: `public void ${methodName}()`,
+      body: `        // TODO: Implement '${step.action}' for ${elementName}
         PageElements.${elementName}.shouldBe(visible);
         System.out.println("⚠️ Action '${step.action}' needs implementation for ${elementName}");`
-  };
+    };
 
-  return `    ${template.annotation}
+    return `    ${template.annotation}
     ${template.signature} {
         try {
 ${template.body}
         } catch (Exception e) {
             System.err.println("❌ Failed to perform ${step.action} on ${elementName}: " + e.getMessage());
-            PageElements.${elementName}.shouldHave(cssValue("border", "3px solid red"));
             throw new RuntimeException("Step failed: ${step.action} on ${elementName}", e);
         }
     }`;
-}
-,
+  },
   
   generateStepDescription(step) {
     const elementName = this.generateElementName(step);
     const descriptions = {
       click: `user clicks on ${elementName}`,
       sendKeys: `user enters "${step.data || '{text}'}" in ${elementName}`,
+      type: `user types "${step.data || '{text}'}" in ${elementName}`,
       clear: `user clears ${elementName}`,
       hover: `user hovers over ${elementName}`,
-      doubleClick: `user double clicks on ${elementName}`
+      doubleClick: `user double clicks on ${elementName}`,
+      rightClick: `user right clicks on ${elementName}`
     };
     return descriptions[step.action] || `user performs ${step.action} on ${elementName}`;
   },
@@ -981,21 +1176,6 @@ ${template.body}
       console.error('❌ Fallback download also failed:', fallbackError);
       alert(`Download failed for ${filename}.\n\nContent preview:\n${content.substring(0, 500)}...`);
     }
-  },
-  
-  // Debug method to manually check recorder state
-  debugRecorderState() {
-    console.log('🔍 Manual debug of recorder state:');
-    console.log('this.recorderState:', this.recorderState);
-    console.log('window.recorderState:', window.recorderState);
-    console.log('Steps in this.recorderState:', this.recorderState?.steps);
-    console.log('Steps in window.recorderState:', window.recorderState?.steps);
-    
-    return {
-      localSteps: this.recorderState?.steps?.length || 0,
-      globalSteps: window.recorderState?.steps?.length || 0,
-      isRecording: this.recorderState?.isRecording || window.recorderState?.isRecording
-    };
   }
 },
   };
@@ -1011,7 +1191,7 @@ ${template.body}
   const actionsHandler = RecorderModules.ActionsHandler.init(window.recorderState, ui);
   const exportHandler = RecorderModules.ExportHandler.init(window.recorderState, ui);
   
-  // Bind UI events
+  // Bind UI events with proper pause/resume logic
   bindUIEvents(ui, actionsHandler, exportHandler);
   
   // Show welcome message
@@ -1064,7 +1244,7 @@ ${template.body}
             </div>
           </div>
         </div>
-        <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 8px; margin-top: 15px; text-align: center; color: #856404; font-size: 10px;">💡 <strong>Tip:</strong> Press <kbd>Escape</kbd> to pause and export</div>
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 8px; margin-top: 15px; text-align: center; color: #856404; font-size: 10px;">💡 <strong>Tip:</strong> Press <kbd>Escape</kbd> to reset recorder completely</div>
       </div>
       <button id="minimizeRecorder" style="position: absolute; top: 10px; left: 10px; background: rgba(52, 152, 219, 0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease;" title="Minimize">−</button>
       <button id="closeRecorder" style="position: absolute; top: 10px; right: 10px; background: rgba(231, 76, 60, 0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;" title="Close">×</button>
@@ -1154,69 +1334,180 @@ ${template.body}
       updateMiniStatus() {
         const miniStatus = this.container.querySelector('#miniStatus');
         if (miniStatus) {
-          miniStatus.textContent = window.recorderState.isRecording ? 
-            `🔴 Recording (${window.recorderState.steps.length})` : 
-            `⏸️ Paused (${window.recorderState.steps.length})`;
+          const state = window.recorderState.isRecording ? '🔴 Recording' : 
+                       window.recorderState.isPaused ? '⏸️ Paused' : '⏹️ Stopped';
+          miniStatus.textContent = `${state} (${window.recorderState.steps.length})`;
         }
       }
     };
   }
   
   function bindUIEvents(ui, actionsHandler, exportHandler) {
-    // Start recording
+    // FIXED START/RESUME BUTTON HANDLER
     ui.startBtn.onclick = function() {
-      console.log('Start recording clicked');
-      window.recorderState.isRecording = true;
-      window.recorderState.steps = [];
-      window.recorderState.stepCounter = 0;
-      
+      console.log('🟢 START/RESUME button clicked');
+      console.log('Current state before click:', {
+        isRecording: window.recorderState.isRecording,
+        isPaused: window.recorderState.isPaused,
+        sessionStarted: window.recorderState.sessionStarted,
+        steps: window.recorderState.steps.length
+      });
+
+      // Check if we're resuming from pause
+      if (window.recorderState.isPaused && window.recorderState.sessionStarted) {
+        // RESUME from pause - keep all existing data
+        console.log('📤 RESUMING from pause - preserving existing steps');
+        window.recorderState.isRecording = true;
+        window.recorderState.isPaused = false;
+        // DO NOT reset steps or stepCounter
+      } else {
+        // START new session
+        console.log('🆕 STARTING new recording session');
+        window.recorderState.steps = [];
+        window.recorderState.stepCounter = 0;
+        window.recorderState.isRecording = true;
+        window.recorderState.isPaused = false;
+        window.recorderState.sessionStarted = true;
+      }
+
+      // Update UI
       ui.startBtn.disabled = true;
       ui.startBtn.style.opacity = '0.6';
+      ui.startBtn.textContent = '🔴 Recording...';
+
       ui.pauseBtn.disabled = false;
       ui.pauseBtn.style.opacity = '1';
+      ui.pauseBtn.textContent = '⏸️ Pause';
+
       ui.exportBtn.disabled = true;
       ui.exportBtn.style.opacity = '0.6';
-      
+
       ui.statusBar.style.background = '#d4edda';
       ui.statusBar.style.color = '#155724';
       ui.statusBar.textContent = '🔴 Recording interactions...';
-      
+
+      console.log('Final state after start/resume:', window.recorderState);
+      saveState();
       ui.updateStepsDisplay();
       ui.updateMiniStatus();
     };
-    
-    // Pause recording
+
+    // FIXED PAUSE BUTTON HANDLER - Two-click behavior: Pause → Reset
     ui.pauseBtn.onclick = function() {
-      console.log('Pause recording clicked');
-      window.recorderState.isRecording = false;
-      
-      ui.startBtn.disabled = false;
-      ui.startBtn.style.opacity = '1';
-      ui.pauseBtn.disabled = true;
-      ui.pauseBtn.style.opacity = '0.6';
-      ui.exportBtn.disabled = false;
-      ui.exportBtn.style.opacity = '1';
-      
-      ui.statusBar.style.background = '#fff3cd';
-      ui.statusBar.style.color = '#856404';
-      ui.statusBar.textContent = `⏸️ Recording paused - ${window.recorderState.steps.length} steps captured`;
-      
-      ui.updateMiniStatus();
+      console.log('⏸️ PAUSE button clicked');
+      console.log('Current state before pause:', window.recorderState);
+
+      // First click: PAUSE (if currently recording)
+      if (window.recorderState.isRecording && !window.recorderState.isPaused) {
+        console.log('📥 FIRST CLICK - Pausing recording');
+        
+        // PAUSE - preserve all data
+        window.recorderState.isRecording = false;
+        window.recorderState.isPaused = true;
+        // Keep sessionStarted = true (so we know this is a pause, not a stop)
+
+        // Update UI for pause state
+        ui.startBtn.disabled = false;
+        ui.startBtn.style.opacity = '1';
+        ui.startBtn.textContent = '▶️ Resume';
+
+        ui.pauseBtn.disabled = false;
+        ui.pauseBtn.style.opacity = '1';
+        ui.pauseBtn.textContent = '🔄 Reset';  // CHANGE TO RESET TEXT
+        ui.pauseBtn.style.background = '#e74c3c';  // Red color for reset
+
+        ui.exportBtn.disabled = false;
+        ui.exportBtn.style.opacity = '1';
+
+        ui.statusBar.style.background = '#fff3cd';
+        ui.statusBar.style.color = '#856404';
+        ui.statusBar.textContent = `⏸️ Recording paused - ${window.recorderState.steps.length} steps captured (Click Reset to clear)`;
+
+        console.log('✅ PAUSED - Steps preserved:', window.recorderState.steps.length);
+        saveState();
+        ui.updateMiniStatus();
+        
+      } 
+      // Second click: RESET (if currently paused)
+      else if (window.recorderState.isPaused) {
+        console.log('🔄 SECOND CLICK - Resetting all data');
+        
+        // Confirm reset
+        if (window.recorderState.steps.length > 0) {
+          if (!confirm(`Reset will permanently clear all ${window.recorderState.steps.length} recorded steps. Continue?`)) {
+            return;
+          }
+        }
+        
+        // Reset everything
+        window.recorderState = createDefaultState();
+        saveState();
+        
+        // Update UI to initial state
+        ui.startBtn.disabled = false;
+        ui.startBtn.style.opacity = '1';
+        ui.startBtn.textContent = '🔴 Start';
+        
+        ui.pauseBtn.disabled = true;
+        ui.pauseBtn.style.opacity = '0.6';
+        ui.pauseBtn.textContent = '⏸️ Pause';  // Back to pause text
+        ui.pauseBtn.style.background = '#f39c12';  // Back to orange
+        
+        ui.exportBtn.disabled = true;
+        ui.exportBtn.style.opacity = '0.6';
+
+        ui.statusBar.style.background = '#f8f9fa';
+        ui.statusBar.style.color = '#495057';
+        ui.statusBar.textContent = '🔄 Recorder reset - ready to start new recording';
+
+        console.log('🔄 All data reset - ready for new recording');
+        ui.updateStepsDisplay();
+        ui.updateMiniStatus();
+        
+      } else {
+        console.warn('Cannot pause/reset - not in valid state');
+      }
     };
-    
+
     // Export files
     ui.exportBtn.onclick = function() {
       console.log('Export files clicked');
       exportHandler.exportFiles();
     };
+
+    // Remove the separate RESET BUTTON since pause button now handles reset
+    // ui.resetBtn.onclick = function() { ... } - REMOVED
     
-    // Close recorder
-    ui.closeBtn.onclick = function() {
-      console.log('Close recorder clicked');
-      ui.container.remove();
-      document.getElementById('recorder-highlighter')?.remove();
-      document.getElementById('recorder-element-info')?.remove();
+    // Close recorder - FIXED
+    ui.closeBtn.onclick = function(e) {
+      console.log('❌ Close recorder clicked');
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (window.recorderState.steps.length > 0) {
+        if (!confirm(`Closing will clear all ${window.recorderState.steps.length} recorded steps. Continue?`)) {
+          return;
+        }
+      }
+      
+      console.log('🗑️ Removing recorder elements...');
+      
+      // Remove event listeners first
       actionsHandler.removeEvents();
+      
+      // Remove UI elements
+      const container = document.getElementById('enhanced-test-recorder-container');
+      const highlighter = document.getElementById('recorder-highlighter');
+      const elementInfo = document.getElementById('recorder-element-info');
+      
+      if (container) container.remove();
+      if (highlighter) highlighter.remove();
+      if (elementInfo) elementInfo.remove();
+      
+      // Clear saved state
+      sessionStorage.removeItem('testRecorderState');
+      
+      console.log('✅ Recorder closed successfully');
     };
     
     // Minimize/Restore functionality
@@ -1237,9 +1528,9 @@ ${template.body}
           text-align: center; font-size: 12px; color: #2c3e50;
           font-weight: 500; margin-top: 5px;
         `;
-        miniStatus.textContent = window.recorderState.isRecording ? 
-          `🔴 Recording (${window.recorderState.steps.length})` : 
-          `⏸️ Paused (${window.recorderState.steps.length})`;
+        const state = window.recorderState.isRecording ? '🔴 Recording' : 
+                     window.recorderState.isPaused ? '⏸️ Paused' : '⏹️ Stopped';
+        miniStatus.textContent = `${state} (${window.recorderState.steps.length})`;
         
         ui.container.appendChild(miniStatus);
         
@@ -1254,72 +1545,185 @@ ${template.body}
         const miniStatus = ui.container.querySelector('#miniStatus');
         if (miniStatus) miniStatus.remove();
       }
+      saveState();
     };
     
     // Make recorder draggable
     makeDraggable(ui);
-  }
-  
-  function makeDraggable(ui) {
-    let isDragging = false;
-    let currentX, currentY, initialX, initialY;
-    let xOffset = 0, yOffset = 0;
     
-    const header = ui.container.querySelector('div:first-child');
-    
-    header.addEventListener('mousedown', dragStart);
-    document.addEventListener('mousemove', dragMove);
-    document.addEventListener('mouseup', dragEnd);
-    
-    function dragStart(e) {
-      if (e.target === ui.minimizeBtn || e.target === ui.closeBtn) return;
-      
-      initialX = e.clientX - xOffset;
-      initialY = e.clientY - yOffset;
-      
-      if (e.target === header || header.contains(e.target)) {
-        isDragging = true;
-      }
+    // Restore UI state if resuming
+    if (window.recorderState.isPaused && window.recorderState.sessionStarted) {
+      ui.startBtn.textContent = '▶️ Resume';
+      ui.pauseBtn.disabled = false;
+      ui.pauseBtn.style.opacity = '1';
+      ui.pauseBtn.textContent = '🔄 Reset';  // Show reset when paused
+      ui.pauseBtn.style.background = '#e74c3c';  // Red color for reset
+      ui.exportBtn.disabled = false;
+      ui.exportBtn.style.opacity = '1';
+      ui.statusBar.style.background = '#fff3cd';
+      ui.statusBar.style.color = '#856404';
+      ui.statusBar.textContent = `⏸️ Recording paused - ${window.recorderState.steps.length} steps captured (Click Reset to clear)`;
+    } else if (window.recorderState.isRecording) {
+      ui.startBtn.disabled = true;
+      ui.startBtn.style.opacity = '0.6';
+      ui.startBtn.textContent = '🔴 Recording...';
+      ui.pauseBtn.disabled = false;
+      ui.pauseBtn.style.opacity = '1';
+      ui.pauseBtn.textContent = '⏸️ Pause';  // Show pause when recording
+      ui.pauseBtn.style.background = '#f39c12';  // Orange for pause
+      ui.statusBar.style.background = '#d4edda';
+      ui.statusBar.style.color = '#155724';
+      ui.statusBar.textContent = '🔴 Recording interactions...';
     }
     
-    function dragMove(e) {
-      if (isDragging) {
-        e.preventDefault();
-        currentX = e.clientX - initialX;
-        currentY = e.clientY - initialY;
+    // Update display with restored steps
+    ui.updateStepsDisplay();
+    ui.updateMiniStatus();
+  }
+  
+ function makeDraggable(ui) {
+    let isDragging = false;
+    let offsetX = 0, offsetY = 0;
+    let startX = 0, startY = 0;
+    
+    const header = ui.container.querySelector('div:first-child');
+    const container = ui.container;
+    
+    // Set initial position if not already set
+    if (!container.style.left && !container.style.top) {
+        container.style.position = 'fixed';
+        container.style.left = '20px';
+        container.style.top = '20px';
+    }
+    
+    header.addEventListener('mousedown', startDrag);
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('mouseup', endDrag);
+    
+    function startDrag(e) {
+        // Ignore if clicking on buttons
+        if (e.target === ui.minimizeBtn || e.target === ui.closeBtn) return;
         
-        xOffset = currentX;
-        yOffset = currentY;
+        // Only start drag if clicking on header
+        if (e.target === header || header.contains(e.target)) {
+            isDragging = true;
+            
+            // Get initial mouse position
+            startX = e.clientX;
+            startY = e.clientY;
+            
+            // Get current element position
+            const rect = container.getBoundingClientRect();
+            offsetX = startX - rect.left;
+            offsetY = startY - rect.top;
+            
+            // Add active styling
+            container.style.cursor = 'grabbing';
+            container.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.3)';
+            container.style.transition = 'none'; // Disable transitions during drag
+            
+            e.preventDefault();
+        }
+    }
+    
+    function drag(e) {
+        if (!isDragging) return;
         
-        const rect = ui.container.getBoundingClientRect();
+        // Calculate new position
+        let newX = e.clientX - offsetX;
+        let newY = e.clientY - offsetY;
+        
+        // Constrain to viewport boundaries
+        const rect = container.getBoundingClientRect();
         const maxX = window.innerWidth - rect.width;
         const maxY = window.innerHeight - rect.height;
         
-        xOffset = Math.max(0, Math.min(xOffset, maxX));
-        yOffset = Math.max(0, Math.min(yOffset, maxY));
+        newX = Math.max(0, Math.min(newX, maxX));
+        newY = Math.max(0, Math.min(newY, maxY));
         
-        ui.container.style.transform = `translate(${xOffset}px, ${yOffset}px)`;
-      }
+        // Apply new position
+        container.style.left = `${newX}px`;
+        container.style.top = `${newY}px`;
+        
+        e.preventDefault();
     }
     
-    function dragEnd() {
-      initialX = currentX;
-      initialY = currentY;
-      isDragging = false;
+    function endDrag() {
+        if (!isDragging) return;
+        
+        isDragging = false;
+        
+        // Restore styling
+        container.style.cursor = '';
+        container.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.15)';
+        container.style.transition = 'all 0.3s ease';
+    }
+    
+    // Handle window resize to keep container in bounds
+    window.addEventListener('resize', () => {
+        const rect = container.getBoundingClientRect();
+        const maxX = window.innerWidth - rect.width;
+        const maxY = window.innerHeight - rect.height;
+        
+        const currentX = parseInt(container.style.left) || 0;
+        const currentY = parseInt(container.style.top) || 0;
+        
+        if (currentX > maxX || currentY > maxY) {
+            container.style.left = `${Math.min(currentX, maxX)}px`;
+            container.style.top = `${Math.min(currentY, maxY)}px`;
+        }
+    });
+}
+  
+  function showWelcomeMessage(ui) {
+    if (window.recorderState.steps.length > 0) {
+      ui.statusBar.style.background = '#d1ecf1';
+      ui.statusBar.style.color = '#0c5460';
+      ui.statusBar.textContent = `🎉 Recorder restored with ${window.recorderState.steps.length} steps!`;
+      
+      setTimeout(() => {
+        if (window.recorderState.isPaused) {
+          ui.statusBar.style.background = '#fff3cd';
+          ui.statusBar.style.color = '#856404';
+          ui.statusBar.textContent = `⏸️ Recording paused - ${window.recorderState.steps.length} steps captured`;
+        } else {
+          ui.statusBar.style.background = '#e2e3e5';
+          ui.statusBar.style.color = '#6c757d';
+          ui.statusBar.textContent = 'Ready to record interactions';
+        }
+      }, 3000);
+    } else {
+      ui.statusBar.style.background = '#d1ecf1';
+      ui.statusBar.style.color = '#0c5460';
+      ui.statusBar.textContent = '🎉 Recorder loaded! Click Start to begin recording.';
+      
+      setTimeout(() => {
+        ui.statusBar.style.background = '#e2e3e5';
+        ui.statusBar.style.color = '#6c757d';
+        ui.statusBar.textContent = 'Ready to record interactions';
+      }, 3000);
     }
   }
   
-  function showWelcomeMessage(ui) {
-    ui.statusBar.style.background = '#d1ecf1';
-    ui.statusBar.style.color = '#0c5460';
-    ui.statusBar.textContent = '🎉 Recorder loaded! Click Start to begin recording.';
-    
-    setTimeout(() => {
-      ui.statusBar.style.background = '#e2e3e5';
-      ui.statusBar.style.color = '#6c757d';
-      ui.statusBar.textContent = 'Ready to record interactions';
-    }, 3000);
-  }
+  // Global debug functions
+  window.debugRecorderState = function() {
+    console.log('🔍 Current Recorder State:');
+    console.log('isRecording:', window.recorderState?.isRecording);
+    console.log('isPaused:', window.recorderState?.isPaused);
+    console.log('sessionStarted:', window.recorderState?.sessionStarted);
+    console.log('steps:', window.recorderState?.steps?.length);
+    console.log('stepCounter:', window.recorderState?.stepCounter);
+    console.log('Full state:', window.recorderState);
+    return window.recorderState;
+  };
+  
+  window.testRecording = function() {
+    window.recorderState.isRecording = true;
+    window.recorderState.isPaused = false;
+    window.recorderState.sessionStarted = true;
+    console.log('✅ Manually set recording state to true');
+    return window.recorderState;
+  };
 }
 
 function handleInjectionError(error, statusDiv, injectButton, originalText) {

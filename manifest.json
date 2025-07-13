@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Enhanced Test Automation Recorder",
-  "version": "1.0.0",
-  "description": "Advanced BDD Test Generation with Smart Features for Selenium automation",
+  "name": "Salesforce Test Automation Recorder",
+  "version": "2.1.0",
+  "description": "Streamlined Test Recorder with Smart XPath Generation, Editable Steps, and Drag-and-Drop UI",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
-    "contextMenus"
+    "downloads"
   ],
   "host_permissions": [
     "http://*/*",
@@ -15,7 +15,9 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Enhanced Test Automation Recorder"
+    "default_title": "Test Recorder",
+    "default_icon": {
+    }
   },
   "background": {
     "service_worker": "background.js"
@@ -24,27 +26,50 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_end"
+      "run_at": "document_end",
+      "all_frames": true
     }
   ],
   "commands": {
     "toggle-recorder": {
       "suggested_key": {
-        "default": "Ctrl+Shift+R"
+        "default": "Ctrl+Shift+R",
+        "mac": "Command+Shift+R"
       },
-      "description": "Toggle test recorder"
+      "description": "Toggle test recorder panel"
     },
     "start-recording": {
       "suggested_key": {
-        "default": "Ctrl+Shift+S"
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
       },
-      "description": "Start recording"
+      "description": "Start/Resume recording"
     },
-    "stop-recording": {
+    "pause-recording": {
       "suggested_key": {
-        "default": "Ctrl+Shift+E"
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
       },
-      "description": "Stop recording"
+      "description": "Pause recording (click again to reset)"
+    },
+    "export-files": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      },
+      "description": "Export test files"
     }
-  }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup.html",
+        "popup.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
