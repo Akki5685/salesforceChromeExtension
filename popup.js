@@ -1194,21 +1194,21 @@ ${template.body}
       border: 1px solid rgba(255, 255, 255, 0.2) !important;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
       font-size: 14px !important; padding: 30px !important; transition: all 0.3s ease !important;
-      resize: both !important; min-width: 400px !important; min-height: 200px !important;
+      resize: both !important; min-width: 200px !important; min-height: 200px !important;
     `;
     
     container.innerHTML = `
-      <div style="text-align: center; margin-bottom: 20px; padding-bottom: 15px; background-color: #002f6c; color: white; margin: -30px -30px 20px -30px; padding: 20px 30px; border-radius: 16px 16px 0 0; cursor: move; user-select: none;">
-        <h1 style="color: white; font-size: 20px; font-weight: 600; margin-bottom: 5px;"> Enhanced Test Recorder</h1>
-        <p style="color: #e0e0e0; font-size: 12px;">Advanced Step Management & BDD Generation</p>
-      </div>
-      <div id="recorderContent" style="transition: all 0.3s ease;">
-        <div style="margin-bottom: 15px;">
-          <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #e0e0e0; font-size: 12px;">Scenario:</label>
-          <textarea id="stepLabel" rows="2" style="width: 100%; padding: 8px 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 12px; background: white; font-family: inherit; resize: vertical; min-height: 60px; box-sizing: border-box;" placeholder="Describe the scenario here..."></textarea>
-        </div>
+      <div style="text-align: center; margin-bottom: 10px; padding-bottom: 10px; background-color: #002f6c; color: white; margin: -30px -30px 10px -30px; padding: 15px 30px; border-radius: 16px 16px 0 0; cursor: move; user-select: none;">
+  <h1 style="color: white; font-size: 20px; font-weight: 600; margin-bottom: 2px;">Enhanced Test Recorder</h1>
+  <p style="color: #e0e0e0; font-size: 12px; margin: 0;">Advanced Step Management & BDD Generation</p>
+</div>
+<div id="recorderContent" style="transition: all 0.3s ease;">
+  <div style="margin-bottom: 10px;">
+    <label style="display: block; margin-bottom: 4px; font-weight: 500; color: #e0e0e0; font-size: 12px;">Scenario:</label>
+    <textarea id="stepLabel" rows="2" style="width: 100%; padding: 8px 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 12px; background: white; font-family: inherit; resize: vertical; min-height: 60px; box-sizing: border-box;" placeholder="Describe the scenario here..."></textarea>
+  </div>
         <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 15px; flex-wrap: wrap;">
-          <button id="startRecording" style="padding: 8px 16px; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.5px; background: linear-gradient(45deg, #667eea, #764ba2); color: white;">🔴 Start</button>
+          <button id="startRecording" style="padding: 8px 16px; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.5px; background: linear-gradient(45deg, #667eea,  #002f6c); color: white;">🔴 Start</button>
           <button id="pauseRecording" disabled style="padding: 8px 16px; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.5px; background: #f39c12; color: white; opacity: 0.6;">⏸️ Pause</button>
           <button id="exportFiles" disabled style="padding: 8px 16px; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.5px; background: #27ae60; color: white; opacity: 0.6;">📦 Export</button>
         </div>
@@ -1278,7 +1278,7 @@ ${template.body}
         if (window.recorderState.steps.length === 0) {
           this.stepsContent.innerHTML = `
             <div style="text-align: center; padding: 30px 12px; color: #7f8c8d;">
-              <div style="font-size: 32px; margin-bottom: 10px; opacity: 0.5;">🎭</div>
+              <div style="font-size: 32px; margin-bottom: 10px; opacity: 0.5;"></div>
               <h3 style="font-size: 14px; margin-bottom: 5px;">No steps recorded yet</h3>
               <p style="font-size: 11px;">Click "Start" and interact with elements</p>
             </div>
@@ -1828,7 +1828,7 @@ ${template.body}
         const miniStatus = document.createElement('div');
         miniStatus.id = 'miniStatus';
         miniStatus.style.cssText = `
-          text-align: center; font-size: 12px; color: #2c3e50;
+          text-align: center; font-size: 12px; color: #ffffffff;
           font-weight: 500; margin-top: 5px;
         `;
         const state = window.recorderState.isRecording ? '🔴 Recording' : 
