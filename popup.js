@@ -1,4 +1,4 @@
-// popup.js - Complete working version with proper pause/resume functionality
+// popup.js - Complete working version with enhanced step management features
 document.addEventListener('DOMContentLoaded', function() {
   console.log('Enhanced Test Recorder popup loaded');
 
@@ -218,34 +218,30 @@ function initializeCompleteRecorder() {
     return null;
   },
 
+  idBasedXPath(el) {
+   if (el.id) {
+    const matchingNode = Array.from(document.querySelectorAll(`[for="${el.id}"]`))
+      .find(el => el.textContent?.trim());
 
-idBasedXPath(el) {
- if (el.id) {
-  const matchingNode = Array.from(document.querySelectorAll(`[for="${el.id}"]`))
-    .find(el => el.textContent?.trim());
+    const labelText = matchingNode?.textContent?.trim();
 
-  const labelText = matchingNode?.textContent?.trim();
-
-  if (labelText) {
-    return `//${el.tagName.toLowerCase()}[@id=//*[normalize-space(text())="${labelText}"]/@for]`;
+    if (labelText) {
+      return `//${el.tagName.toLowerCase()}[@id=//*[normalize-space(text())="${labelText}"]/@for]`;
+    }
   }
-}
-},
+  },
 
+  textBasedXPath(el) {
+    if (!el || el.children.length > 0) return null;
 
+    const text = el.textContent?.trim();
+    if (!text) return null;
 
-textBasedXPath(el) {
-  if (!el || el.children.length > 0) return null;
+    const tag = el.tagName.toLowerCase();
+    const safeText = this.clean(text);
 
-  const text = el.textContent?.trim();
-  if (!text) return null;
-
-  const tag = el.tagName.toLowerCase();
-  const safeText = this.clean(text);
-
-  return `//${tag}[normalize-space(text())="${safeText}"]`;
-}
-,
+    return `//${tag}[normalize-space(text())="${safeText}"]`;
+  },
 
   attrBasedXPath(el, attrs) {
     const tag = el.tagName.toLowerCase();
@@ -262,41 +258,41 @@ textBasedXPath(el) {
     }
     return null;
   },
+
   highlightValueByLabel(label) {
-  const xpathPatterns = [
-    `(//p[@title='${label}'])[1]/following-sibling::*/descendant::a`,
-    `(//span[text()='${label}']/../following-sibling::*/descendant::button/span)[1]`,
-    `//span[text()='${label}']/parent::div/following-sibling::*/descendant::lightning-formatted-text`,
-    `//p[text()='${label}']//following-sibling::*//a`,
-    `//span[text()='${label}']/ancestor::div[contains(@class,'slds-form-element')]/div[contains(@class,'slds-form-element__control')]//a | //span[text()='${label}']/ancestor::div[contains(@class,'slds-form-element')]/div[contains(@class,'slds-form-element__control')]//span`
-  ];
+    const xpathPatterns = [
+      `(//p[@title='${label}'])[1]/following-sibling::*/descendant::a`,
+      `(//span[text()='${label}']/../following-sibling::*/descendant::button/span)[1]`,
+      `//span[text()='${label}']/parent::div/following-sibling::*/descendant::lightning-formatted-text`,
+      `//p[text()='${label}']//following-sibling::*//a`,
+      `//span[text()='${label}']/ancestor::div[contains(@class,'slds-form-element')]/div[contains(@class,'slds-form-element__control')]//a | //span[text()='${label}']/ancestor::div[contains(@class,'slds-form-element')]/div[contains(@class,'slds-form-element__control')]//span`
+    ];
 
-  for (const xpath of xpathPatterns) {
-    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    for (const xpath of xpathPatterns) {
+      const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
-    if (result) {
-      // Highlight visually
-      const rect = result.getBoundingClientRect();
-      const hl = document.getElementById('recorder-highlighter');
-      if (hl) {
-        Object.assign(hl.style, {
-          display: 'block',
-          left: `${rect.left + window.scrollX - 3}px`,
-          top: `${rect.top + window.scrollY - 3}px`,
-          width: `${rect.width + 6}px`,
-          height: `${rect.height + 6}px`
-        });
+      if (result) {
+        // Highlight visually
+        const rect = result.getBoundingClientRect();
+        const hl = document.getElementById('recorder-highlighter');
+        if (hl) {
+          Object.assign(hl.style, {
+            display: 'block',
+            left: `${rect.left + window.scrollX - 3}px`,
+            top: `${rect.top + window.scrollY - 3}px`,
+            width: `${rect.width + 6}px`,
+            height: `${rect.height + 6}px`
+          });
+        }
+
+        // Return value
+        return result.innerText?.trim() || result.textContent?.trim() || '';
       }
-
-      // Return value
-      return result.innerText?.trim() || result.textContent?.trim() || '';
     }
-  }
 
-  console.warn(`No value found for label: "${label}"`);
-  return null;
-},
-
+    console.warn(`No value found for label: "${label}"`);
+    return null;
+  },
 
   structuralXPath(el, attrs) {
     let current = el;
@@ -562,122 +558,122 @@ textBasedXPath(el) {
   },
 
   keyboardHandler(e) {
-
-// Escape key works regardless of recording state
-if (e.key === 'Escape') {
-  e.preventDefault();
-  console.log('🔄 Escape pressed - handling escape key');
-  
-  const handleEscape = async () => {
-    try {
-      // If we have steps, export them first
-      if (window.recorderState.steps.length > 0) {
-        console.log(`📦 Exporting ${window.recorderState.steps.length} steps before reset...`);
-        
-        // Get the export handler
-        const exportHandler = RecorderModules.ExportHandler;
-        if (!exportHandler) {
-          console.error('ExportHandler not found in RecorderModules');
-          return;
-        }
-        
-        // Make sure we have UI context
-        const ui = this.ui || window.recorderUI; // Fallback to global UI if needed
-        if (!ui) {
-          console.error('UI context not available for export');
-          return;
-        }
-        
-        // Initialize export handler
-        exportHandler.init(window.recorderState, ui);
-        
-        // Create a promise that resolves when export is complete
-        await new Promise((resolve, reject) => {
-          try {
-            // Check if exportFiles returns a promise
-            const exportResult = exportHandler.exportFiles();
-            
-            if (exportResult && typeof exportResult.then === 'function') {
-              // If it's a promise, wait for it
-              exportResult
-                .then(() => {
-                  console.log('✅ Export completed successfully');
-                  resolve();
-                })
-                .catch(reject);
-            } else {
-              // If it's synchronous, give it time to complete DOM operations
-              setTimeout(() => {
-                console.log('✅ Export completed (synchronous)');
-                resolve();
-              }, 1500); // Increased timeout
-            }
-          } catch (error) {
-            reject(error);
-          }
-        });
-        
-        console.log('📦 Export process finished');
-        
-      } else {
-        console.log('ℹ️ No steps to export');
-      }
+    // Escape key works regardless of recording state
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      console.log('🔄 Escape pressed - handling escape key');
       
-    } catch (error) {
-      console.error('❌ Export failed during escape:', error);
-      // Continue with reset even if export fails
-    }
-    
-    // Reset the recorder state
-    console.log('🔄 Resetting recorder state...');
-    window.recorderState = createDefaultState();
-    
-    // Save the reset state
-    if (typeof saveState === 'function') {
-      saveState();
-    }
-    
-    // Update UI to reset state
-    const ui = this.ui || window.recorderUI;
-    if (ui) {
-      try {
-        ui.startBtn.disabled = false;
-        ui.startBtn.style.opacity = '1';
-        ui.startBtn.textContent = '🔴 Start';
-        
-        ui.pauseBtn.disabled = true;
-        ui.pauseBtn.style.opacity = '0.6';
-        ui.pauseBtn.textContent = '⏸️ Pause';
-        
-        ui.exportBtn.disabled = true;
-        ui.exportBtn.style.opacity = '0.6';
-        ui.statusBar.style.background = '#f8f9fa';
-        ui.statusBar.style.color = '#495057';
-        ui.statusBar.textContent = window.recorderState.steps.length > 0 ? 
-          '🔄 Reset after export' : '🔄 Recorder reset';
-        
-        // Update displays if methods exist
-        if (typeof ui.updateStepsDisplay === 'function') {
-          ui.updateStepsDisplay();
+      const handleEscape = async () => {
+        try {
+          // If we have steps, export them first
+          if (window.recorderState.steps.length > 0) {
+            console.log(`📦 Exporting ${window.recorderState.steps.length} steps before reset...`);
+            
+            // Get the export handler
+            const exportHandler = RecorderModules.ExportHandler;
+            if (!exportHandler) {
+              console.error('ExportHandler not found in RecorderModules');
+              return;
+            }
+            
+            // Make sure we have UI context
+            const ui = this.ui || window.recorderUI; // Fallback to global UI if needed
+            if (!ui) {
+              console.error('UI context not available for export');
+              return;
+            }
+            
+            // Initialize export handler
+            exportHandler.init(window.recorderState, ui);
+            
+            // Create a promise that resolves when export is complete
+            await new Promise((resolve, reject) => {
+              try {
+                // Check if exportFiles returns a promise
+                const exportResult = exportHandler.exportFiles();
+                
+                if (exportResult && typeof exportResult.then === 'function') {
+                  // If it's a promise, wait for it
+                  exportResult
+                    .then(() => {
+                      console.log('✅ Export completed successfully');
+                      resolve();
+                    })
+                    .catch(reject);
+                } else {
+                  // If it's synchronous, give it time to complete DOM operations
+                  setTimeout(() => {
+                    console.log('✅ Export completed (synchronous)');
+                    resolve();
+                  }, 1500); // Increased timeout
+                }
+              } catch (error) {
+                reject(error);
+              }
+            });
+            
+            console.log('📦 Export process finished');
+            
+          } else {
+            console.log('ℹ️ No steps to export');
+          }
+          
+        } catch (error) {
+          console.error('❌ Export failed during escape:', error);
+          // Continue with reset even if export fails
         }
-        if (typeof ui.updateMiniStatus === 'function') {
-          ui.updateMiniStatus();
+        
+        // Reset the recorder state
+        console.log('🔄 Resetting recorder state...');
+        window.recorderState = createDefaultState();
+        
+        // Save the reset state
+        if (typeof saveState === 'function') {
+          saveState();
         }
         
-        console.log('✅ UI updated successfully');
-        
-      } catch (uiError) {
-        console.error('❌ UI update failed:', uiError);
-      }
-    } else {
-      console.warn('⚠️ UI not available for reset');
+        // Update UI to reset state
+        const ui = this.ui || window.recorderUI;
+        if (ui) {
+          try {
+            ui.startBtn.disabled = false;
+            ui.startBtn.style.opacity = '1';
+            ui.startBtn.textContent = '🔴 Start';
+            
+            ui.pauseBtn.disabled = true;
+            ui.pauseBtn.style.opacity = '0.6';
+            ui.pauseBtn.textContent = '⏸️ Pause';
+            
+            ui.exportBtn.disabled = true;
+            ui.exportBtn.style.opacity = '0.6';
+            ui.statusBar.style.background = '#f8f9fa';
+            ui.statusBar.style.color = '#495057';
+            ui.statusBar.textContent = window.recorderState.steps.length > 0 ? 
+              '🔄 Reset after export' : '🔄 Recorder reset';
+            
+            // Update displays if methods exist
+            if (typeof ui.updateStepsDisplay === 'function') {
+              ui.updateStepsDisplay();
+            }
+            if (typeof ui.updateMiniStatus === 'function') {
+              ui.updateMiniStatus();
+            }
+            
+            console.log('✅ UI updated successfully');
+            
+          } catch (uiError) {
+            console.error('❌ UI update failed:', uiError);
+          }
+        } else {
+          console.warn('⚠️ UI not available for reset');
+        }
+      };
+      
+      // Call the async handler
+      handleEscape();
+      return;
     }
-  };
-  
-  // Call the async handler
-  handleEscape();
-  return;
-}
+
     // Other keyboard shortcuts only work when actively recording
     if (!window.recorderState?.isRecording || window.recorderState?.isPaused) return;
 
@@ -1017,35 +1013,23 @@ ${steps.filter(step => step.action && step.xpath).map(step => `    When ${this.g
         body: `        PageElements.${elementName}.shouldBe(visible, enabled).setValue(text);
         System.out.println("✅ Entered text '" + text + "' in ${elementName}");`
       },
-      type: {
-        annotation: `@When("User types {string} in ${elementName}")`,
-        signature: `public void ${methodName}(String text)`,
-        body: `        PageElements.${elementName}.shouldBe(visible, enabled).setValue(text);
-        System.out.println("✅ Typed text '" + text + "' in ${elementName}");`
-      },
-      clear: {
-        annotation: `@When("User clears ${elementName}")`,
+      save: {
+        annotation: `@When("User saves value from ${elementName}")`,
         signature: `public void ${methodName}()`,
-        body: `        PageElements.${elementName}.shouldBe(visible, enabled).clear();
-        System.out.println("✅ Cleared ${elementName}");`
+        body: `        String value = PageElements.${elementName}.shouldBe(visible).getText();
+        System.out.println("✅ Saved value: " + value + " from ${elementName}");`
       },
-      hover: {
-        annotation: `@When("User hovers over ${elementName}")`,
-        signature: `public void ${methodName}()`,
-        body: `        PageElements.${elementName}.shouldBe(visible).hover();
-        System.out.println("✅ Hovered over ${elementName}");`
+      verify: {
+        annotation: `@Then("User verifies {string} in ${elementName}")`,
+        signature: `public void ${methodName}(String expectedText)`,
+        body: `        PageElements.${elementName}.shouldBe(visible).shouldHave(text(expectedText));
+        System.out.println("✅ Verified text '" + expectedText + "' in ${elementName}");`
       },
-      doubleClick: {
-        annotation: `@When("User double clicks on ${elementName}")`,
+      wait: {
+        annotation: `@When("User waits for ${elementName} to be visible")`,
         signature: `public void ${methodName}()`,
-        body: `        PageElements.${elementName}.shouldBe(visible, enabled).doubleClick();
-        System.out.println("✅ Double-clicked on ${elementName}");`
-      },
-      rightClick: {
-        annotation: `@When("User right clicks on ${elementName}")`,
-        signature: `public void ${methodName}()`,
-        body: `        PageElements.${elementName}.shouldBe(visible, enabled).contextClick();
-        System.out.println("✅ Right-clicked on ${elementName}");`
+        body: `        PageElements.${elementName}.shouldBe(visible, Duration.ofSeconds(10));
+        System.out.println("✅ Waited for ${elementName} to be visible");`
       }
     };
     
@@ -1073,11 +1057,9 @@ ${template.body}
     const descriptions = {
       click: `user clicks on ${elementName}`,
       sendKeys: `user enters "${step.data || '{text}'}" in ${elementName}`,
-      type: `user types "${step.data || '{text}'}" in ${elementName}`,
-      clear: `user clears ${elementName}`,
-      hover: `user hovers over ${elementName}`,
-      doubleClick: `user double clicks on ${elementName}`,
-      rightClick: `user right clicks on ${elementName}`
+      save: `user saves value from ${elementName}`,
+      verify: `user verifies "${step.data || '{text}'}" in ${elementName}`,
+      wait: `user waits for ${elementName} to be visible`
     };
     return descriptions[step.action] || `user performs ${step.action} on ${elementName}`;
   },
@@ -1199,30 +1181,30 @@ ${template.body}
   
   console.log('✅ Complete Test Recorder initialized successfully!');
   
-  // Shared UI functions
+  // Enhanced UI functions with step management features
   function createRecorderUI() {
     const container = document.createElement('div');
     container.id = 'enhanced-test-recorder-container';
     container.style.cssText = `
       position: fixed !important; top: 20px !important; right: 20px !important;
-      z-index: 2147483647 !important; background: rgba(255, 255, 255, 0.95) !important;
+      z-index: 2147483647 !important; background: #002f6c !important;
       backdrop-filter: blur(10px) !important; border-radius: 16px !important;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15) !important; width: 450px !important;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15) !important; width: 500px !important;
       max-height: 85vh !important; overflow-y: auto !important;
       border: 1px solid rgba(255, 255, 255, 0.2) !important;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
       font-size: 14px !important; padding: 30px !important; transition: all 0.3s ease !important;
-      resize: both !important; min-width: 350px !important; min-height: 200px !important;
+      resize: both !important; min-width: 400px !important; min-height: 200px !important;
     `;
     
     container.innerHTML = `
       <div style="text-align: center; margin-bottom: 20px; padding-bottom: 15px; background-color: #002f6c; color: white; margin: -30px -30px 20px -30px; padding: 20px 30px; border-radius: 16px 16px 0 0; cursor: move; user-select: none;">
-        <h1 style="color: white; font-size: 20px; font-weight: 600; margin-bottom: 5px;">🚀 Test Recorder</h1>
-        <p style="color: #e0e0e0; font-size: 12px;">Advanced BDD Test Generation</p>
+        <h1 style="color: white; font-size: 20px; font-weight: 600; margin-bottom: 5px;"> Enhanced Test Recorder</h1>
+        <p style="color: #e0e0e0; font-size: 12px;">Advanced Step Management & BDD Generation</p>
       </div>
       <div id="recorderContent" style="transition: all 0.3s ease;">
         <div style="margin-bottom: 15px;">
-          <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #34495e; font-size: 12px;">Scenario:</label>
+          <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #e0e0e0; font-size: 12px;">Scenario:</label>
           <textarea id="stepLabel" rows="2" style="width: 100%; padding: 8px 12px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 12px; background: white; font-family: inherit; resize: vertical; min-height: 60px; box-sizing: border-box;" placeholder="Describe the scenario here..."></textarea>
         </div>
         <div style="display: flex; gap: 8px; justify-content: center; margin-bottom: 15px; flex-wrap: wrap;">
@@ -1232,19 +1214,20 @@ ${template.body}
         </div>
         <div id="statusBar" style="text-align: center; margin-bottom: 15px; padding: 8px; border-radius: 6px; font-weight: 500; font-size: 11px; background: #e2e3e5; color: #6c757d; border: 1px solid #d6d8db;">Ready to record interactions</div>
         <div style="border: 2px solid #e0e0e0; border-radius: 12px; overflow: hidden; background: white;">
-          <div style="background: linear-gradient(45deg, #667eea, #764ba2); color: white; padding: 12px; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="background: linear-gradient(45deg, #667eea, #002f6c); color: white; padding: 12px; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; align-items: center;">
             <span>Steps Recorded</span>
             <span id="stepCount">0 steps</span>
           </div>
-          <div id="stepsContent">
+          <div id="stepsContent" style="max-height: 300px; overflow-y: auto;">
             <div style="text-align: center; padding: 30px 12px; color: #7f8c8d;">
-              <div style="font-size: 32px; margin-bottom: 10px; opacity: 0.5;">🎭</div>
               <h3 style="font-size: 14px; margin-bottom: 5px;">No steps recorded yet</h3>
               <p style="font-size: 11px;">Click "Start" and interact with elements</p>
             </div>
           </div>
         </div>
-        <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 8px; margin-top: 15px; text-align: center; color: #856404; font-size: 10px;">💡 <strong>Tip:</strong> Press <kbd>Escape</kbd> to reset recorder completely</div>
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 8px; margin-top: 15px; text-align: center; color: #856404; font-size: 10px;">
+          💡 <strong>Features:</strong> Double-click to edit • Drag to reorder • Hover between steps to delete • Restricted action dropdown
+        </div>
       </div>
       <button id="minimizeRecorder" style="position: absolute; top: 10px; left: 10px; background: rgba(52, 152, 219, 0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease;" title="Minimize">−</button>
       <button id="closeRecorder" style="position: absolute; top: 10px; right: 10px; background: rgba(231, 76, 60, 0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;" title="Close">×</button>
@@ -1304,31 +1287,354 @@ ${template.body}
         }
         
         const tableHTML = `
-          <div style="max-height: 200px; overflow-y: auto;">
-            <table style="width: 100%; border-collapse: collapse;">
-              <thead style="position: sticky; top: 0; background: #f8f9fa;">
-                <tr>
-                  <th style="background: #f8f9fa; padding: 8px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 30px;">#</th>
-                  <th style="background: #f8f9fa; padding: 8px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px;">XPath</th>
-                  <th style="background: #f8f9fa; padding: 8px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 60px;">Action</th>
-                  <th style="background: #f8f9fa; padding: 8px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 80px;">Data</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${window.recorderState.steps.map((step) => `
-                  <tr style="border-bottom: 1px solid #e0e0e0;" title="Step ${step.id}: ${step.timestamp}">
-                    <td style="padding: 8px; font-size: 10px;">${step.id}</td>
-                    <td style="padding: 8px; font-size: 9px; font-family: monospace; color: #e74c3c; word-break: break-all; max-width: 200px;" title="${step.xpath}">${step.xpath.length > 50 ? step.xpath.substring(0, 50) + '...' : step.xpath}</td>
-                    <td style="padding: 8px; font-size: 10px; color: #27ae60; font-weight: 500;">${step.action}</td>
-                    <td style="padding: 8px; font-size: 10px; color: #6c757d;" title="${step.data || ''}">${step.data ? (step.data.length > 20 ? step.data.substring(0, 20) + '...' : step.data) : '—'}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
+          <table style="width: 100%; border-collapse: collapse;" id="stepsTable">
+            <thead style="position: sticky; top: 0; background: #f8f9fa; z-index: 10;">
+              <tr>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 40px;"></th>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 40px;">#</th>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px;">XPath</th>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 100px;">Action</th>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 120px;">Data</th>
+              </tr>
+            </thead>
+            <tbody id="stepsTableBody">
+              ${window.recorderState.steps.map((step, index) => this.generateStepRow(step, index)).join('')}
+            </tbody>
+          </table>
         `;
         
         this.stepsContent.innerHTML = tableHTML;
+        this.initializeStepFeatures();
+      },
+      
+      generateStepRow(step, index) {
+        return `
+          <tr class="step-row" data-step-index="${index}" draggable="true" style="transition: all 0.3s ease;">
+            <td style="padding: 6px 4px; border-bottom: 1px solid #e0e0e0; text-align: center;">
+              <span class="drag-handle" style="cursor: move; opacity: 0.3; transition: opacity 0.3s; user-select: none;">⋮⋮</span>
+            </td>
+            <td style="padding: 6px 4px; border-bottom: 1px solid #e0e0e0;">
+              <span style="background: #667eea; color: white; padding: 2px 6px; border-radius: 50%; font-size: 10px; font-weight: bold;">${step.id}</span>
+            </td>
+            <td style="padding: 6px 4px; border-bottom: 1px solid #e0e0e0; font-family: monospace; font-size: 9px; color: #e74c3c; word-break: break-all; max-width: 200px; cursor: pointer;" 
+                class="xpath-editable display-mode" 
+                data-field="xpath" 
+                data-step-index="${index}" 
+                title="Double-click to edit">${step.xpath || 'No XPath'}</td>
+            <td style="padding: 6px 4px; border-bottom: 1px solid #e0e0e0; cursor: pointer;" 
+                class="action-editable display-mode" 
+                data-field="action" 
+                data-step-index="${index}" 
+                title="Double-click to edit">
+              <span style="color: #27ae60; font-weight: 500; font-size: 10px;">${step.action}</span>
+            </td>
+            <td style="padding: 6px 4px; border-bottom: 1px solid #e0e0e0; color: #6c757d; font-size: 10px; cursor: pointer;" 
+                class="data-editable display-mode" 
+                data-field="data" 
+                data-step-index="${index}" 
+                title="Double-click to edit">${step.data || '—'}</td>
+          </tr>
+          <tr class="control-zone-row" data-after-index="${index}">
+            <td colspan="5" style="height: 3px; padding: 0; border: none; background: transparent; position: relative; transition: all 0.3s ease;" 
+                class="control-zone" 
+                data-step-index="${index}" 
+                title="Hover for controls"></td>
+          </tr>
+        `;
+      },
+      
+      initializeStepFeatures() {
+        this.initializeEditableFields();
+        this.initializeDragAndDrop();
+        this.initializeControlZones();
+      },
+      
+      initializeEditableFields() {
+        const editableFields = this.stepsContent.querySelectorAll('.xpath-editable, .data-editable, .action-editable');
+        
+        editableFields.forEach(field => {
+          field.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            this.makeFieldEditable(field);
+          });
+        });
+      },
+      
+      makeFieldEditable(field) {
+        // Prevent multiple edits
+        if (field.classList.contains('editing')) return;
+        
+        const stepIndex = parseInt(field.dataset.stepIndex);
+        const fieldType = field.dataset.field;
+        const currentValue = window.recorderState.steps[stepIndex][fieldType] || '';
+        
+        field.classList.remove('display-mode');
+        field.classList.add('editing');
+        
+        let inputElement;
+        
+        if (fieldType === 'action') {
+          // Create dropdown for action field
+          inputElement = document.createElement('select');
+          inputElement.style.cssText = `
+            width: 100%; padding: 4px; border: 2px solid #667eea; border-radius: 3px; 
+            font-size: 10px; background: white; box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+            color: #27ae60; font-weight: 500;
+          `;
+          
+          const actions = ['click', 'save', 'verify', 'wait', 'sendKeys'];
+          actions.forEach(action => {
+            const option = document.createElement('option');
+            option.value = action;
+            option.textContent = action;
+            option.selected = action === currentValue;
+            inputElement.appendChild(option);
+          });
+        } else {
+          // Create input/textarea for other fields
+          inputElement = document.createElement(fieldType === 'xpath' ? 'textarea' : 'input');
+          inputElement.value = currentValue;
+          inputElement.style.cssText = `
+            width: 100%; padding: 4px; border: 2px solid #667eea; border-radius: 3px; 
+            font-size: 9px; font-family: ${fieldType === 'xpath' ? 'monospace' : 'inherit'}; 
+            background: white; box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2); 
+            ${fieldType === 'xpath' ? 'resize: vertical; min-height: 40px;' : ''}
+          `;
+        }
+        
+        const originalContent = field.innerHTML;
+        field.innerHTML = '';
+        field.appendChild(inputElement);
+        
+        inputElement.focus();
+        if (inputElement.select) inputElement.select();
+        
+        const saveEdit = () => {
+          const newValue = inputElement.value.trim();
+          if (newValue !== currentValue) {
+            window.recorderState.steps[stepIndex][fieldType] = newValue;
+            saveState();
+          }
+          
+          // Restore display mode
+          field.classList.remove('editing');
+          field.classList.add('display-mode');
+          
+          if (fieldType === 'action') {
+            field.innerHTML = `<span style="color: #27ae60; font-weight: 500; font-size: 10px;">${newValue}</span>`;
+          } else {
+            field.textContent = newValue || (fieldType === 'data' ? '—' : 'No XPath');
+          }
+        };
+        
+        const cancelEdit = () => {
+          field.classList.remove('editing');
+          field.classList.add('display-mode');
+          field.innerHTML = originalContent;
+        };
+        
+        inputElement.addEventListener('blur', saveEdit);
+        inputElement.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            saveEdit();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelEdit();
+          }
+        });
+      },
+      
+      initializeDragAndDrop() {
+        const tbody = this.stepsContent.querySelector('#stepsTableBody');
+        if (!tbody) return;
+        
+        let draggedElement = null;
+        let draggedIndex = null;
+        
+        tbody.addEventListener('dragstart', (e) => {
+          if (e.target.classList.contains('step-row')) {
+            draggedElement = e.target;
+            draggedIndex = parseInt(e.target.dataset.stepIndex);
+            e.target.style.opacity = '0.5';
+            e.dataTransfer.effectAllowed = 'move';
+          }
+        });
+        
+        tbody.addEventListener('dragend', (e) => {
+          if (e.target.classList.contains('step-row')) {
+            e.target.style.opacity = '1';
+            draggedElement = null;
+            draggedIndex = null;
+          }
+        });
+        
+        tbody.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        });
+        
+        tbody.addEventListener('drop', (e) => {
+          e.preventDefault();
+          
+          if (!draggedElement) return;
+          
+          const targetRow = e.target.closest('.step-row');
+          if (!targetRow || targetRow === draggedElement) return;
+          
+          const targetIndex = parseInt(targetRow.dataset.stepIndex);
+          
+          // Reorder steps in the state
+          const draggedStep = window.recorderState.steps[draggedIndex];
+          window.recorderState.steps.splice(draggedIndex, 1);
+          window.recorderState.steps.splice(targetIndex, 0, draggedStep);
+          
+          // Update step IDs to maintain sequence
+          window.recorderState.steps.forEach((step, index) => {
+            step.id = index + 1;
+          });
+          
+          saveState();
+          this.updateStepsDisplay();
+        });
+        
+        // Show drag handle on hover
+        const stepRows = tbody.querySelectorAll('.step-row');
+        stepRows.forEach(row => {
+          const dragHandle = row.querySelector('.drag-handle');
+          row.addEventListener('mouseenter', () => {
+            if (dragHandle) dragHandle.style.opacity = '1';
+          });
+          row.addEventListener('mouseleave', () => {
+            if (dragHandle) dragHandle.style.opacity = '0.3';
+          });
+        });
+      },
+      
+      initializeControlZones() {
+        const controlZones = this.stepsContent.querySelectorAll('.control-zone');
+        
+        controlZones.forEach(zone => {
+          zone.addEventListener('mouseenter', (e) => {
+            const stepIndex = parseInt(e.target.dataset.stepIndex);
+            this.showControlButtons(e.target, stepIndex);
+          });
+          
+          zone.addEventListener('mouseleave', (e) => {
+            this.hideControlButtons(e.target);
+          });
+        });
+      },
+      
+      showControlButtons(zone, stepIndex) {
+        zone.style.height = '30px';
+        zone.style.background = 'rgba(108, 117, 125, 0.1)';
+        zone.style.cursor = 'pointer';
+        
+        const step = window.recorderState.steps[stepIndex];
+        zone.innerHTML = `
+          <div style="display: flex; justify-content: center; align-items: center; height: 100%; gap: 10px;">
+            <button class="control-btn delete-btn" data-action="delete" data-step-index="${stepIndex}" 
+                    style="background: #e74c3c; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; transition: all 0.3s ease;"
+                    title="Delete step ${step.id} above">
+              🗑️ Delete Above
+            </button>
+            <button class="control-btn add-btn" data-action="add" data-step-index="${stepIndex}" 
+                    style="background: #28a745; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; transition: all 0.3s ease;"
+                    title="Add step above step ${step.id}">
+              ➕ Add Above
+            </button>
+          </div>
+        `;
+        
+        // Add event listeners to buttons
+        const deleteBtn = zone.querySelector('.delete-btn');
+        const addBtn = zone.querySelector('.add-btn');
+        
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.deleteStepAbove(stepIndex);
+        });
+        
+        addBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.addStepAbove(stepIndex);
+        });
+        
+        // Add hover effects
+        deleteBtn.addEventListener('mouseenter', () => {
+          deleteBtn.style.background = '#c82333';
+          deleteBtn.style.transform = 'scale(1.05)';
+        });
+        deleteBtn.addEventListener('mouseleave', () => {
+          deleteBtn.style.background = '#e74c3c';
+          deleteBtn.style.transform = 'scale(1)';
+        });
+        
+        addBtn.addEventListener('mouseenter', () => {
+          addBtn.style.background = '#218838';
+          addBtn.style.transform = 'scale(1.05)';
+        });
+        addBtn.addEventListener('mouseleave', () => {
+          addBtn.style.background = '#28a745';
+          addBtn.style.transform = 'scale(1)';
+        });
+      },
+      
+      hideControlButtons(zone) {
+        zone.style.height = '3px';
+        zone.style.background = 'transparent';
+        zone.innerHTML = '';
+      },
+      
+      deleteStepAbove(stepIndex) {
+        const step = window.recorderState.steps[stepIndex];
+        
+        if (confirm(`Delete step ${step.id}: ${step.action} on ${step.xpath?.substring(0, 50)}...?`)) {
+          window.recorderState.steps.splice(stepIndex, 1);
+          
+          // Update step IDs to maintain sequence
+          window.recorderState.steps.forEach((step, index) => {
+            step.id = index + 1;
+          });
+          
+          saveState();
+          this.updateStepsDisplay();
+        }
+      },
+      
+      addStepAbove(stepIndex) {
+        const newStep = {
+          id: 0, // Will be updated when renumbering
+          xpath: '//input[@placeholder="Enter XPath"]',
+          action: 'click',
+          data: '',
+          element: 'INPUT',
+          timestamp: new Date().toISOString(),
+          isManual: true
+        };
+        
+        // Insert the new step at the specified position
+        window.recorderState.steps.splice(stepIndex, 0, newStep);
+        
+        // Update step counter
+        window.recorderState.stepCounter++;
+        
+        // Update step IDs to maintain sequence
+        window.recorderState.steps.forEach((step, index) => {
+          step.id = index + 1;
+        });
+        
+        saveState();
+        this.updateStepsDisplay();
+        
+        // Automatically edit the new step's XPath
+        setTimeout(() => {
+          const newStepRow = this.stepsContent.querySelector(`[data-step-index="${stepIndex}"] .xpath-editable`);
+          if (newStepRow) {
+            this.makeFieldEditable(newStepRow);
+          }
+        }, 100);
       },
       
       updateMiniStatus() {
@@ -1474,9 +1780,6 @@ ${template.body}
       console.log('Export files clicked');
       exportHandler.exportFiles();
     };
-
-    // Remove the separate RESET BUTTON since pause button now handles reset
-    // ui.resetBtn.onclick = function() { ... } - REMOVED
     
     // Close recorder - FIXED
     ui.closeBtn.onclick = function(e) {
@@ -1536,7 +1839,7 @@ ${template.body}
         
       } else {
         ui.recorderContent.style.display = 'block';
-        ui.container.style.width = '450px';
+        ui.container.style.width = '500px';
         ui.container.style.height = 'auto';
         ui.container.style.padding = '30px';
         ui.minimizeBtn.textContent = '−';
