@@ -344,52 +344,57 @@ function initializeCompleteRecorder() {
     return this;
   },
 
-  getLabelForElement(el) {
-    if (!el) return null;
-
-    function buildShortXPath(fromEl, toEl) {
-      const tag = toEl.tagName.toLowerCase();
-      return `(//*[normalize-space(.)="${fromEl.textContent.trim()}"]/following::*//${tag})[1]`;
-    }
-
-    // Step 1: Find label using your traversal
-    let current = el;
-    let level = 0;
-    let labelEl = null;
-
-    while (current && level < 20) {
-      const sibling = current.previousElementSibling;
-      if (sibling && sibling.textContent.trim()) {
-        labelEl = sibling;
-        break;
-      }
-      current = current.parentElement;
-      level++;
-    }
-
-    if (!labelEl) return null;
-
-    // Step 2: Scan container for value element
-    const container = labelEl.parentElement;
-    if (!container) return null;
-
-    const candidates = container.querySelectorAll("*");
-    for (const candidate of candidates) {
-      const valueText = candidate.textContent?.trim();
-      if (
-        valueText &&
-        valueText !== labelEl.textContent.trim() &&
-        !candidate.querySelector("*")
-      ) {
-        return {
-          label: labelEl.textContent.trim(),
-          xpathShort: buildShortXPath(labelEl, candidate)
-        };
-      }
-    }
-
+  getLabelForElement(element) {
+  if (!element || !element.textContent) {
+    console.warn('⚠️ Invalid or empty input element');
     return null;
-  },
+  }
+  console.log('👉 Input Element:', element);
+
+  const formElement = element.closest('.slds-form-element');
+  if (!formElement) {
+    console.warn('❌ .slds-form-element not found');
+    return null;
+  }
+  console.log('✅ Found form element');
+
+  let labelEl = formElement.querySelector('.test-id__field-label-container span');
+  if (!labelEl || !labelEl.textContent.trim()) {
+    labelEl = Array.from(formElement.querySelectorAll('span'))
+      .find(el => el.textContent?.trim());
+  }
+
+  if (!labelEl) {
+    console.warn('❌ Label element not found');
+    return null;
+  }
+
+  const labelText = labelEl.textContent.trim();
+  console.log('✅ Label:', labelText);
+
+  const valueContainer = formElement.querySelector('.slds-form-element__control');
+  if (!valueContainer) {
+    console.warn('❌ Value container not found');
+    return null;
+  }
+
+  const preferredTags = ['a', 'span', 'lightning-formatted-text', 'lightning-formatted-number'];
+  for (const tag of preferredTags) {
+    const el = Array.from(valueContainer.querySelectorAll(tag))
+      .find(e => e.textContent?.trim());
+    if (el) {
+      const xpath = `(//span[normalize-space(text())='${labelText}']/ancestor::div[contains(@class,'slds-form-element')]/div[contains(@class,'slds-form-element__control')]//${tag}/text())[1]`;
+      console.log('✅ Matched tag:', tag);
+      return { label: labelText, tag, xpath };
+    }
+  }
+
+  console.warn('❌ No value element with text found');
+  return null;
+}
+
+
+,
 
   bindEvents() {
     this.mouseoverHandler = this.mouseoverHandler.bind(this);
@@ -420,7 +425,7 @@ function initializeCompleteRecorder() {
     console.log('Event listeners removed');
   },
 
-  getValueByLabel(el) {
+   getValueByLabel(el) {
     if (!el) return null;
 
     const parent = el.parentElement;
@@ -446,6 +451,7 @@ function initializeCompleteRecorder() {
     return null;
   },
 
+
   mouseoverHandler(e) {
     if (!window.recorderState?.features?.highlight || this._ignoreElement(e.target)) return;
     this.showHighlight(e.target);
@@ -458,48 +464,56 @@ function initializeCompleteRecorder() {
   },
 
   altClickHandler(e) {
-    console.log('Alt+Click event - checking recording state:', {
-      isRecording: window.recorderState?.isRecording,
-      isPaused: window.recorderState?.isPaused,
-      altKey: e.altKey,
-      ignored: this._ignoreElement(e.target)
-    });
+  console.log('Alt+Click event - checking recording state:', {
+    isRecording: window.recorderState?.isRecording,
+    isPaused: window.recorderState?.isPaused,
+    altKey: e.altKey,
+    ignored: this._ignoreElement(e.target)
+  });
 
-    // Must be actively recording (not paused) AND Alt key pressed AND not ignored element
-    if (!window.recorderState?.isRecording || window.recorderState?.isPaused || !e.altKey || this._ignoreElement(e.target)) {
-      console.log('❌ Alt+Click ignored - not recording, paused, no alt key, or element ignored');
-      return;
-    }
+  // Validation checks
+  if (
+    !window.recorderState?.isRecording ||
+    window.recorderState?.isPaused ||
+    !e.altKey ||
+    this._ignoreElement(e.target)
+  ) {
+    console.log('❌ Alt+Click ignored - not recording, paused, no alt key, or element ignored');
+    return;
+  }
 
-    e.preventDefault();
-    e.stopPropagation();
+  e.preventDefault();
+  e.stopPropagation();
 
-    const labelInfo = this.getLabelForElement(e.target);
-    if (!labelInfo) {
-      console.warn("Label-value not found for:", e.target);
-      return;
-    }
+  // Try to extract label + XPath from the clicked element
+  const labelInfo = this.getLabelForElement(e.target);
+  if (!labelInfo) {
+    console.warn("⚠️ Label-value not found for:", e.target);
+    return;
+  }
 
-    const { label, xpathShort } = labelInfo;
-    const value = e.target.textContent?.trim() || e.target.value || '';
+  const { label, xpath, tag } = labelInfo;
+  const value = e.target.textContent?.trim() || e.target.value || '';
 
-    const step = {
-      id: ++window.recorderState.stepCounter,
-      xpath: xpathShort,
-      action: 'save',
-      data: label,
-      element: e.target.tagName,
-      timestamp: new Date().toISOString()
-    };
+  const step = {
+    id: ++window.recorderState.stepCounter,
+    xpath,
+    action: 'save',
+    data: label,
+    value,
+    element: tag || e.target.tagName,
+    timestamp: new Date().toISOString()
+  };
 
-    window.recorderState.steps.push(step);
-    saveState();
-    this.ui.updateStepsDisplay();
-    this.ui.updateMiniStatus();
-    this.ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured`;
+  window.recorderState.steps.push(step);
+  saveState();
+  this.ui.updateStepsDisplay();
+  this.ui.updateMiniStatus();
+  this.ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured`;
 
-    console.log('✅ Alt+Click recorded step:', step);
-  },
+  console.log('✅ Alt+Click recorded step:', step);
+}
+,
 
   clickHandler(e) {
     console.log('Click event - checking recording state:', {
