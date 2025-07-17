@@ -1,4 +1,4 @@
-// popup.js - Complete working version with enhanced step management features
+// popup.js - Enhanced Test Recorder with Frame Handling, XPath Fixes, and Input Action Management
 document.addEventListener('DOMContentLoaded', function () {
   console.log('Enhanced Test Recorder popup loaded');
 
@@ -99,6 +99,8 @@ function initializeCompleteRecorder() {
       steps: [],
       stepCounter: 0,
       isMinimized: false,
+      currentFrame: 'main', // Track current frame context
+      frameMap: new Map(),   // Map frame names to their window objects
       features: {
         highlight: true,
         xpathPreview: true,
@@ -120,24 +122,145 @@ function initializeCompleteRecorder() {
 
   // Complete inline modules
   const RecorderModules = {
+    // FIX 1: Enhanced Frame Handler
+    FrameHandler: {
+      init() {
+        this.detectFrames();
+        this.setupFrameListeners();
+        console.log('FrameHandler initialized');
+        return this;
+      },
+
+      detectFrames() {
+        // Detect all iframes in the current page
+        const frames = document.querySelectorAll('iframe, frame');
+        window.recorderState.frameMap.clear();
+        
+        // Add main window
+        window.recorderState.frameMap.set('main', window);
+        
+        frames.forEach((frame, index) => {
+          try {
+            const frameName = frame.name || frame.id || `frame_${index}`;
+            const frameWindow = frame.contentWindow;
+            
+            if (frameWindow && this.isAccessibleFrame(frameWindow)) {
+              window.recorderState.frameMap.set(frameName, frameWindow);
+              console.log(`📋 Detected accessible frame: ${frameName}`);
+              
+              // Inject frame detection into the frame
+              this.injectFrameDetection(frameWindow, frameName);
+            }
+          } catch (e) {
+            console.warn(`Cannot access frame ${index}:`, e.message);
+          }
+        });
+        
+        console.log(`🔍 Total accessible frames: ${window.recorderState.frameMap.size}`);
+      },
+
+      isAccessibleFrame(frameWindow) {
+        try {
+          // Test access by trying to read a property
+          return frameWindow.document && frameWindow.document.readyState;
+        } catch (e) {
+          return false;
+        }
+      },
+
+      injectFrameDetection(frameWindow, frameName) {
+        try {
+          // Inject frame identification into the frame
+          frameWindow.eval(`
+            if (!window.frameIdentifier) {
+              window.frameIdentifier = '${frameName}';
+              window.parentRecorder = window.parent;
+              console.log('Frame ${frameName} identified');
+            }
+          `);
+        } catch (e) {
+          console.warn(`Failed to inject into frame ${frameName}:`, e);
+        }
+      },
+
+      setupFrameListeners() {
+        // Listen for messages from frames
+        window.addEventListener('message', (event) => {
+          if (event.data && event.data.type === 'RECORDER_FRAME_EVENT') {
+            this.handleFrameEvent(event.data);
+          }
+        });
+      },
+
+      handleFrameEvent(eventData) {
+        const { frameName, elementData, action, data } = eventData;
+        console.log(`📨 Received frame event from ${frameName}:`, action);
+        
+        // Switch context to the frame and record the action
+        const originalFrame = window.recorderState.currentFrame;
+        window.recorderState.currentFrame = frameName;
+        
+        // Record the interaction with frame context
+        const step = {
+          id: ++window.recorderState.stepCounter,
+          xpath: elementData.xpath,
+          action: action,
+          data: data || '',
+          element: elementData.tagName,
+          frame: frameName,
+          timestamp: new Date().toISOString()
+        };
+
+        window.recorderState.steps.push(step);
+        saveState();
+        
+        // Update UI
+        const ui = window.recorderUI;
+        if (ui) {
+          ui.updateStepsDisplay();
+          ui.updateMiniStatus();
+          ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured (Frame: ${frameName})`;
+        }
+        
+        // Restore original frame context
+        window.recorderState.currentFrame = originalFrame;
+      },
+
+      getCurrentFrameWindow() {
+        return window.recorderState.frameMap.get(window.recorderState.currentFrame) || window;
+      },
+
+      switchToFrame(frameName) {
+        if (window.recorderState.frameMap.has(frameName)) {
+          window.recorderState.currentFrame = frameName;
+          console.log(`🔄 Switched to frame: ${frameName}`);
+          return true;
+        }
+        console.warn(`❌ Frame not found: ${frameName}`);
+        return false;
+      }
+    },
+
+    // FIX 2: Enhanced XPath Generator with Precise Element Targeting
     XPathGenerator: {
-      // Enhanced Salesforce XPath Generator - NO ID attributes, NO classes, NO contains() class logic
       generateXPath(element) {
         if (!element) return '';
 
-        const allAttrs = this.extractAttributes(element);
+        // FIX: Ensure we're targeting the exact element with text content
+        const finalElement = this.getTextContainingElement(element);
+        const allAttrs = this.extractAttributes(finalElement);
         const stableAttrs = this.filterAttributes(allAttrs);
 
         const strategies = [
-          () => this.titleBasedXPath(element),
-          () => this.labelBasedXPath(element),
-          () => this.nameBasedXPath(element, stableAttrs),
-          () => this.idBasedXPath(element),
-          () => this.textBasedXPath(element),
-          () => this.attrBasedXPath(element, stableAttrs),
-          () => this.salesforceXPath(element, stableAttrs),
-          () => this.structuralXPath(element, stableAttrs),
-          () => this.positionalFallbackXPath(element)
+          () => this.exactTextXPath(finalElement),
+          () => this.titleBasedXPath(finalElement),
+          () => this.labelBasedXPath(finalElement),
+          () => this.nameBasedXPath(finalElement, stableAttrs),
+          () => this.idBasedXPath(finalElement),
+          () => this.attrBasedXPath(finalElement, stableAttrs),
+          () => this.salesforceXPath(finalElement, stableAttrs),
+          () => this.structuralXPath(finalElement, stableAttrs),
+          () => this.positionalFallbackXPath(finalElement)
         ];
 
         for (const strategy of strategies) {
@@ -145,9 +268,88 @@ function initializeCompleteRecorder() {
           if (xpath && this.isUnique(xpath)) return xpath;
         }
 
-        const fallback = this.fallbackXPath(element);
+        const fallback = this.fallbackXPath(finalElement);
         console.warn('⚠️ Using fallback XPath:', fallback);
         return fallback;
+      },
+
+      // FIX: Get the most specific element that contains the text
+      getTextContainingElement(element) {
+        // If element has direct text content (not just from children), use it
+        const directText = this.getDirectTextContent(element);
+        if (directText && directText.length > 0) {
+          return element;
+        }
+
+        // Find the most specific child element with text
+        const textElements = this.findTextElements(element);
+        if (textElements.length > 0) {
+          // Return the most specific (deepest) text element
+          return textElements.reduce((prev, current) => {
+            return this.getElementDepth(current) > this.getElementDepth(prev) ? current : prev;
+          });
+        }
+
+        return element;
+      },
+
+      getDirectTextContent(element) {
+        // Get only the direct text content, excluding text from child elements
+        const childNodes = Array.from(element.childNodes);
+        return childNodes
+          .filter(node => node.nodeType === Node.TEXT_NODE)
+          .map(node => node.textContent.trim())
+          .filter(text => text.length > 0)
+          .join(' ');
+      },
+
+      findTextElements(element) {
+        const textElements = [];
+        const walker = document.createTreeWalker(
+          element,
+          NodeFilter.SHOW_ELEMENT,
+          {
+            acceptNode: (node) => {
+              const directText = this.getDirectTextContent(node);
+              return directText.length > 0 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+            }
+          }
+        );
+
+        let node;
+        while (node = walker.nextNode()) {
+          textElements.push(node);
+        }
+
+        return textElements;
+      },
+
+      getElementDepth(element) {
+        let depth = 0;
+        let current = element;
+        while (current.parentElement) {
+          depth++;
+          current = current.parentElement;
+        }
+        return depth;
+      },
+
+      // FIX: Exact text matching strategy
+      exactTextXPath(el) {
+        const directText = this.getDirectTextContent(el);
+        if (directText && directText.length > 0 && directText.length < 50) {
+          const tag = el.tagName.toLowerCase();
+          const cleanText = this.clean(directText);
+          
+          // Try exact text match first
+          let xpath = `//${tag}[normalize-space(text())="${cleanText}"]`;
+          if (this.isUnique(xpath)) return xpath;
+          
+          // Try contains if exact doesn't work
+          xpath = `//${tag}[contains(normalize-space(text()),"${cleanText}")]`;
+          if (this.isUnique(xpath)) return xpath;
+        }
+        return null;
       },
 
       extractAttributes(el) {
@@ -155,7 +357,11 @@ function initializeCompleteRecorder() {
         [...el.attributes].forEach(({ name, value }) => {
           if (!name.match(/id|class/i)) attrs[name] = value;
         });
-        if (el.textContent?.trim()) attrs['text()'] = el.textContent.trim();
+        
+        // Add text content
+        const directText = this.getDirectTextContent(el);
+        if (directText) attrs['text()'] = directText;
+        
         if (el.tagName) attrs['tagName'] = el.tagName.toLowerCase();
         return { ...attrs, ...this.salesforceContext(el) };
       },
@@ -189,19 +395,31 @@ function initializeCompleteRecorder() {
       },
 
       isUnique(xpath) {
-        const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-        const count = result.snapshotLength;
+        try {
+          const frameWindow = RecorderModules.FrameHandler.getCurrentFrameWindow();
+          const result = frameWindow.document.evaluate(
+            xpath, 
+            frameWindow.document, 
+            null, 
+            XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, 
+            null
+          );
+          const count = result.snapshotLength;
 
-        if (count === 0) {
-          console.warn("❌ No elements matched.");
+          if (count === 0) {
+            console.warn("❌ No elements matched.");
+            return false;
+          } else if (count > 1) {
+            console.warn(`⚠️ XPath matched ${count} elements.`);
+            return false;
+          } else {
+            const el = result.snapshotItem(0);
+            console.log("✅ XPath is unique. Element:", el);
+            return true;
+          }
+        } catch (e) {
+          console.error("XPath evaluation error:", e);
           return false;
-        } else if (count > 1) {
-          console.warn(`⚠️ XPath matched ${count} elements.`);
-          return false;
-        } else {
-          const el = result.snapshotItem(0);
-          console.log("✅ XPath is unique. Element:", el);
-          return true;
         }
       },
 
@@ -243,18 +461,6 @@ function initializeCompleteRecorder() {
         }
       },
 
-      textBasedXPath(el) {
-        if (!el || el.children.length > 0) return null;
-
-        const text = el.textContent?.trim();
-        if (!text) return null;
-
-        const tag = el.tagName.toLowerCase();
-        const safeText = this.clean(text);
-
-        return `//${tag}[normalize-space(text())="${safeText}"]`;
-      },
-
       attrBasedXPath(el, attrs) {
         const tag = el.tagName.toLowerCase();
         const keys = ['aria-label', 'placeholder', 'title', 'role'];
@@ -268,41 +474,6 @@ function initializeCompleteRecorder() {
         if (el.tagName === 'INPUT' && attrs['data-field-label']) {
           return `//div[@data-field-label="${attrs['data-field-label']}"]//input`;
         }
-        return null;
-      },
-
-      highlightValueByLabel(label) {
-        const xpathPatterns = [
-          `(//p[@title='${label}'])[1]/following-sibling::*/descendant::a`,
-          `(//span[text()='${label}']/../following-sibling::*/descendant::button/span)[1]`,
-          `//span[text()='${label}']/parent::div/following-sibling::*/descendant::lightning-formatted-text`,
-          `//p[text()='${label}']//following-sibling::*//a`,
-          `//span[text()='${label}']/ancestor::div[contains(@class,'slds-form-element')]/div[contains(@class,'slds-form-element__control')]//a | //span[text()='${label}']/ancestor::div[contains(@class,'slds-form-element')]/div[contains(@class,'slds-form-element__control')]//span`
-        ];
-
-        for (const xpath of xpathPatterns) {
-          const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-
-          if (result) {
-            // Highlight visually
-            const rect = result.getBoundingClientRect();
-            const hl = document.getElementById('recorder-highlighter');
-            if (hl) {
-              Object.assign(hl.style, {
-                display: 'block',
-                left: `${rect.left + window.scrollX - 3}px`,
-                top: `${rect.top + window.scrollY - 3}px`,
-                width: `${rect.width + 6}px`,
-                height: `${rect.height + 6}px`
-              });
-            }
-
-            // Return value
-            return result.innerText?.trim() || result.textContent?.trim() || '';
-          }
-        }
-
-        console.warn(`No value found for label: "${label}"`);
         return null;
       },
 
@@ -334,7 +505,7 @@ function initializeCompleteRecorder() {
           const val = el.getAttribute(attr);
           if (val) conditions.push(`@${attr}="${val}"`);
         });
-        const text = el.textContent?.trim();
+        const text = this.getDirectTextContent(el);
         if (text && text.length < 50) conditions.push(`contains(text(),"${this.clean(text)}")`);
         return conditions.length ? `//${tag}[${conditions.join(' and ')}]` : this.positionalFallbackXPath(el);
       },
@@ -344,16 +515,184 @@ function initializeCompleteRecorder() {
       }
     },
 
-
+    // FIX 3: Enhanced Actions Handler with Input Action Management
     ActionsHandler: {
       init(recorderState, ui) {
         this.recorderState = recorderState;
         this.ui = ui;
         this.inputTimers = new Map();
+        this.inputHistory = new Map(); // Track input history per element
+        this.lastInputValues = new Map(); // Track last values for deduplication
 
         this.bindEvents();
         console.log('ActionsHandler initialized');
         return this;
+      },
+
+      bindEvents() {
+        this.mouseoverHandler = this.mouseoverHandler.bind(this);
+        this.mouseoutHandler = this.mouseoutHandler.bind(this);
+        this.clickHandler = this.clickHandler.bind(this);
+        this.inputHandler = this.inputHandler.bind(this);
+        this.keyboardHandler = this.keyboardHandler.bind(this);
+        this.altClickHandler = this.altClickHandler.bind(this);
+
+        // Bind to both main window and all frames
+        this.bindToWindow(window);
+        
+        // Bind to all accessible frames
+        window.recorderState.frameMap.forEach((frameWindow, frameName) => {
+          if (frameName !== 'main') {
+            try {
+              this.bindToWindow(frameWindow, frameName);
+            } catch (e) {
+              console.warn(`Failed to bind to frame ${frameName}:`, e);
+            }
+          }
+        });
+      },
+
+      bindToWindow(targetWindow, frameName = 'main') {
+        const doc = targetWindow.document;
+        
+        doc.addEventListener('mouseover', this.mouseoverHandler, true);
+        doc.addEventListener('mouseout', this.mouseoutHandler, true);
+        doc.addEventListener('click', this.altClickHandler, true);
+        doc.addEventListener('click', this.clickHandler, true);
+        doc.addEventListener('input', this.inputHandler, true);
+        doc.addEventListener('keydown', this.keyboardHandler, true);
+        
+        console.log(`Events bound to ${frameName}`);
+      },
+
+      removeEvents() {
+        // Remove from main window
+        document.removeEventListener('mouseover', this.mouseoverHandler, true);
+        document.removeEventListener('mouseout', this.mouseoutHandler, true);
+        document.removeEventListener('click', this.altClickHandler, true);
+        document.removeEventListener('click', this.clickHandler, true);
+        document.removeEventListener('input', this.inputHandler, true);
+        document.removeEventListener('keydown', this.keyboardHandler, true);
+
+        // Remove from all frames
+        window.recorderState.frameMap.forEach((frameWindow, frameName) => {
+          if (frameName !== 'main') {
+            try {
+              const doc = frameWindow.document;
+              doc.removeEventListener('mouseover', this.mouseoverHandler, true);
+              doc.removeEventListener('mouseout', this.mouseoutHandler, true);
+              doc.removeEventListener('click', this.altClickHandler, true);
+              doc.removeEventListener('click', this.clickHandler, true);
+              doc.removeEventListener('input', this.inputHandler, true);
+              doc.removeEventListener('keydown', this.keyboardHandler, true);
+            } catch (e) {
+              console.warn(`Failed to remove events from frame ${frameName}:`, e);
+            }
+          }
+        });
+
+        this.inputTimers.forEach(timer => clearTimeout(timer));
+        this.inputTimers.clear();
+        this.inputHistory.clear();
+        this.lastInputValues.clear();
+        console.log('Event listeners removed');
+      },
+
+      // FIX 3: Enhanced input handler with proper action separation
+      inputHandler(e) {
+        console.log('Input event - checking recording state:', {
+          isRecording: window.recorderState?.isRecording,
+          isPaused: window.recorderState?.isPaused,
+          value: e.target.value
+        });
+
+        if (!window.recorderState?.isRecording || window.recorderState?.isPaused || this._ignoreElement(e.target)) return;
+
+        const el = e.target;
+        const currentValue = el.value;
+        const xpath = RecorderModules.XPathGenerator.generateXPath(el);
+        
+        // Create unique key for this element
+        const elementKey = xpath + '_' + el.tagName;
+        
+        // Get the previous value for this element
+        const lastValue = this.lastInputValues.get(elementKey) || '';
+        
+        // Skip if value hasn't actually changed
+        if (currentValue === lastValue) {
+          console.log('Skipping input - value unchanged:', currentValue);
+          return;
+        }
+
+        // Clear existing timer for this element
+        if (this.inputTimers.has(elementKey)) {
+          clearTimeout(this.inputTimers.get(elementKey));
+        }
+
+        // Set new timer for this element
+        const timer = setTimeout(() => {
+          // Double-check the value is still different when timer fires
+          const finalValue = el.value;
+          const storedLastValue = this.lastInputValues.get(elementKey) || '';
+          
+          if (finalValue !== storedLastValue) {
+            // Check if we need to create a new step or update existing
+            const existingStepIndex = this.findLatestInputStep(xpath, elementKey);
+            
+            if (existingStepIndex !== -1) {
+              // Update existing step
+              const existingStep = window.recorderState.steps[existingStepIndex];
+              console.log(`📝 Updating existing sendKeys step ${existingStep.id}: "${existingStep.data}" → "${finalValue}"`);
+              
+              existingStep.data = finalValue;
+              existingStep.timestamp = new Date().toISOString();
+              existingStep.isUpdated = true;
+              
+            } else {
+              // Create new step
+              console.log(`📝 Creating new sendKeys step: "${finalValue}"`);
+              this.recordInteraction(el, 'sendKeys', finalValue);
+            }
+            
+            // Update the last known value
+            this.lastInputValues.set(elementKey, finalValue);
+            
+            // Update UI
+            saveState();
+            this.ui.updateStepsDisplay();
+          }
+          
+          // Clean up timer
+          this.inputTimers.delete(elementKey);
+        }, 1000); // 1 second delay
+
+        this.inputTimers.set(elementKey, timer);
+      },
+
+      // Find the most recent input step for this element within recent steps
+      findLatestInputStep(xpath, elementKey) {
+        const steps = window.recorderState.steps;
+        
+        // Look at the last 5 steps for efficiency
+        const recentSteps = steps.slice(-5);
+        
+        for (let i = recentSteps.length - 1; i >= 0; i--) {
+          const step = recentSteps[i];
+          const actualIndex = steps.length - recentSteps.length + i;
+          
+          if (step.xpath === xpath && step.action === 'sendKeys') {
+            // Check if this step was recorded recently (within last 5 seconds)
+            const stepTime = new Date(step.timestamp);
+            const now = new Date();
+            const timeDiff = (now - stepTime) / 1000;
+            
+            if (timeDiff <= 5) {
+              return actualIndex;
+            }
+          }
+        }
+        
+        return -1;
       },
 
       getLabelForElement(element) {
@@ -368,10 +707,8 @@ function initializeCompleteRecorder() {
           return null;
         }
 
-        // Try standard label span
         let labelEl = formElement.querySelector('.test-id__field-label-container span');
 
-        // Fallback: try any span with readable text
         if (!labelEl || !labelEl.textContent.trim()) {
           labelEl = Array.from(formElement.querySelectorAll('span'))
             .find(el => el.textContent && el.textContent.trim().length > 0);
@@ -389,7 +726,6 @@ function initializeCompleteRecorder() {
           return null;
         }
 
-        // Prefer <a> with text
         const anchorEl = Array.from(valueContainer.querySelectorAll('a'))
           .find(a => a.textContent && a.textContent.trim().length > 0);
         if (anchorEl) {
@@ -400,7 +736,6 @@ function initializeCompleteRecorder() {
           };
         }
 
-        // Next: <span> with text
         const spanEl = Array.from(valueContainer.querySelectorAll('span'))
           .find(span => span.textContent && span.textContent.trim().length > 0);
         if (spanEl) {
@@ -411,7 +746,6 @@ function initializeCompleteRecorder() {
           };
         }
 
-        // Fallback: lightning-formatted-* elements
         const lightningEl = Array.from(valueContainer.querySelectorAll('lightning-formatted-text, lightning-formatted-number, lightning-formatted-date-time'))
           .find(el => el.textContent && el.textContent.trim().length > 0);
         if (lightningEl) {
@@ -424,65 +758,7 @@ function initializeCompleteRecorder() {
 
         console.warn('⚠️ No value element with text found under label:', labelText);
         return null;
-      }
-
-      ,
-
-      bindEvents() {
-        this.mouseoverHandler = this.mouseoverHandler.bind(this);
-        this.mouseoutHandler = this.mouseoutHandler.bind(this);
-        this.clickHandler = this.clickHandler.bind(this);
-        this.inputHandler = this.inputHandler.bind(this);
-        this.keyboardHandler = this.keyboardHandler.bind(this);
-        this.altClickHandler = this.altClickHandler.bind(this);
-
-        document.addEventListener('mouseover', this.mouseoverHandler, true);
-        document.addEventListener('mouseout', this.mouseoutHandler, true);
-        document.addEventListener('click', this.altClickHandler, true);
-        document.addEventListener('click', this.clickHandler, true);
-        document.addEventListener('input', this.inputHandler, true);
-        document.addEventListener('keydown', this.keyboardHandler, true);
       },
-
-      removeEvents() {
-        document.removeEventListener('mouseover', this.mouseoverHandler, true);
-        document.removeEventListener('mouseout', this.mouseoutHandler, true);
-        document.removeEventListener('click', this.altClickHandler, true);
-        document.removeEventListener('click', this.clickHandler, true);
-        document.removeEventListener('input', this.inputHandler, true);
-        document.removeEventListener('keydown', this.keyboardHandler, true);
-
-        this.inputTimers.forEach(timer => clearTimeout(timer));
-        this.inputTimers.clear();
-        console.log('Event listeners removed');
-      },
-
-      getValueByLabel(el) {
-        if (!el) return null;
-
-        const parent = el.parentElement;
-        if (!parent) return null;
-
-        const siblings = Array.from(parent.children);
-        for (const sibling of siblings) {
-          if (sibling === el) continue;
-
-          const text = sibling.textContent?.trim();
-          const hasTitle = sibling.hasAttribute('title');
-
-          if (text && text.length <= 50 && (hasTitle || /^[A-Za-z\s]+$/.test(text))) {
-            return text;
-          }
-
-          const nested = sibling.querySelector('p[title], span');
-          if (nested && nested.textContent.trim()) {
-            return nested.textContent.trim();
-          }
-        }
-
-        return null;
-      },
-
 
       mouseoverHandler(e) {
         if (!window.recorderState?.features?.highlight || this._ignoreElement(e.target)) return;
@@ -503,7 +779,6 @@ function initializeCompleteRecorder() {
           ignored: this._ignoreElement(e.target)
         });
 
-        // Validation checks
         if (
           !window.recorderState?.isRecording ||
           window.recorderState?.isPaused ||
@@ -517,7 +792,6 @@ function initializeCompleteRecorder() {
         e.preventDefault();
         e.stopPropagation();
 
-        // Try to extract label + XPath from the clicked element
         const labelInfo = this.getLabelForElement(e.target);
         if (!labelInfo) {
           console.warn("⚠️ Label-value not found for:", e.target);
@@ -534,6 +808,7 @@ function initializeCompleteRecorder() {
           data: label,
           value,
           element: tag || e.target.tagName,
+          frame: this.getElementFrame(e.target),
           timestamp: new Date().toISOString()
         };
 
@@ -544,8 +819,7 @@ function initializeCompleteRecorder() {
         this.ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured`;
 
         console.log('✅ Alt+Click recorded step:', step);
-      }
-      ,
+      },
 
       clickHandler(e) {
         console.log('Click event - checking recording state:', {
@@ -555,7 +829,6 @@ function initializeCompleteRecorder() {
           ignored: this._ignoreElement(e.target)
         });
 
-        // Must be actively recording (not paused) AND not ignored element
         if (!window.recorderState?.isRecording || window.recorderState?.isPaused || this._ignoreElement(e.target)) {
           console.log('❌ Click ignored - not recording or element ignored');
           return;
@@ -566,43 +839,6 @@ function initializeCompleteRecorder() {
         this.recordInteraction(e.target, 'click', '');
       },
 
-      inputHandler(e) {
-        console.log('Input event - checking recording state:', {
-          isRecording: window.recorderState?.isRecording,
-          isPaused: window.recorderState?.isPaused,
-          value: e.target.value
-        });
-
-        // Must be actively recording (not paused)
-        if (!window.recorderState?.isRecording || window.recorderState?.isPaused || this._ignoreElement(e.target)) return;
-
-        const el = e.target;
-        const value = el.value;
-
-        if (this.inputTimers.has(el)) clearTimeout(this.inputTimers.get(el));
-
-        const timer = setTimeout(() => {
-          const xpath = RecorderModules.XPathGenerator.generateXPath(el);
-          const existing = window.recorderState.steps.findIndex(
-            s => s.xpath === xpath && s.action === 'sendKeys'
-          );
-
-          if (existing !== -1) {
-            window.recorderState.steps[existing].data = value;
-            window.recorderState.steps[existing].timestamp = new Date().toISOString();
-            console.log('Updated existing sendKeys step');
-          } else {
-            this.recordInteraction(el, 'sendKeys', value);
-          }
-
-          saveState();
-          this.ui.updateStepsDisplay();
-          this.inputTimers.delete(el);
-        }, 1000);
-
-        this.inputTimers.set(el, timer);
-      },
-
       keyboardHandler(e) {
         // Escape key works regardless of recording state
         if (e.key === 'Escape') {
@@ -611,35 +847,28 @@ function initializeCompleteRecorder() {
 
           const handleEscape = async () => {
             try {
-              // If we have steps, export them first
               if (window.recorderState.steps.length > 0) {
                 console.log(`📦 Exporting ${window.recorderState.steps.length} steps before reset...`);
 
-                // Get the export handler
                 const exportHandler = RecorderModules.ExportHandler;
                 if (!exportHandler) {
                   console.error('ExportHandler not found in RecorderModules');
                   return;
                 }
 
-                // Make sure we have UI context
-                const ui = this.ui || window.recorderUI; // Fallback to global UI if needed
+                const ui = this.ui || window.recorderUI;
                 if (!ui) {
                   console.error('UI context not available for export');
                   return;
                 }
 
-                // Initialize export handler
                 exportHandler.init(window.recorderState, ui);
 
-                // Create a promise that resolves when export is complete
                 await new Promise((resolve, reject) => {
                   try {
-                    // Check if exportFiles returns a promise
                     const exportResult = exportHandler.exportFiles();
 
                     if (exportResult && typeof exportResult.then === 'function') {
-                      // If it's a promise, wait for it
                       exportResult
                         .then(() => {
                           console.log('✅ Export completed successfully');
@@ -647,11 +876,10 @@ function initializeCompleteRecorder() {
                         })
                         .catch(reject);
                     } else {
-                      // If it's synchronous, give it time to complete DOM operations
                       setTimeout(() => {
                         console.log('✅ Export completed (synchronous)');
                         resolve();
-                      }, 1500); // Increased timeout
+                      }, 1500);
                     }
                   } catch (error) {
                     reject(error);
@@ -666,19 +894,15 @@ function initializeCompleteRecorder() {
 
             } catch (error) {
               console.error('❌ Export failed during escape:', error);
-              // Continue with reset even if export fails
             }
 
-            // Reset the recorder state
             console.log('🔄 Resetting recorder state...');
             window.recorderState = createDefaultState();
 
-            // Save the reset state
             if (typeof saveState === 'function') {
               saveState();
             }
 
-            // Update UI to reset state
             const ui = this.ui || window.recorderUI;
             if (ui) {
               try {
@@ -697,7 +921,6 @@ function initializeCompleteRecorder() {
                 ui.statusBar.textContent = window.recorderState.steps.length > 0 ?
                   '🔄 Reset after export' : '🔄 Recorder reset';
 
-                // Update displays if methods exist
                 if (typeof ui.updateStepsDisplay === 'function') {
                   ui.updateStepsDisplay();
                 }
@@ -715,7 +938,6 @@ function initializeCompleteRecorder() {
             }
           };
 
-          // Call the async handler
           handleEscape();
           return;
         }
@@ -757,12 +979,15 @@ function initializeCompleteRecorder() {
           });
 
           const xpath = RecorderModules.XPathGenerator.generateXPath(element);
+          const frameInfo = this.getElementFrame(element);
+          
           const step = {
             id: ++window.recorderState.stepCounter,
             xpath,
             action,
             data,
             element: element.tagName,
+            frame: frameInfo,
             timestamp: new Date().toISOString()
           };
 
@@ -774,10 +999,49 @@ function initializeCompleteRecorder() {
 
           this.ui.updateStepsDisplay();
           this.ui.updateMiniStatus();
-          this.ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured`;
+          
+          const frameText = frameInfo !== 'main' ? ` (Frame: ${frameInfo})` : '';
+          this.ui.statusBar.textContent = `🔴 Recording - ${window.recorderState.steps.length} steps captured${frameText}`;
 
         } catch (err) {
           console.error('❌ Failed to record step:', err);
+        }
+      },
+
+      getElementFrame(element) {
+        // Determine which frame this element belongs to
+        try {
+          const elementWindow = element.ownerDocument.defaultView;
+          
+          // Check if it's the main window
+          if (elementWindow === window) {
+            return 'main';
+          }
+          
+          // Find the frame name
+          for (const [frameName, frameWindow] of window.recorderState.frameMap) {
+            if (frameWindow === elementWindow) {
+              return frameName;
+            }
+          }
+          
+          // If not found, try to identify by frame element
+          const frames = document.querySelectorAll('iframe, frame');
+          for (let i = 0; i < frames.length; i++) {
+            const frame = frames[i];
+            try {
+              if (frame.contentWindow === elementWindow) {
+                return frame.name || frame.id || `frame_${i}`;
+              }
+            } catch (e) {
+              // Access denied - skip
+            }
+          }
+          
+          return 'unknown_frame';
+        } catch (e) {
+          console.warn('Failed to determine element frame:', e);
+          return 'main';
         }
       },
 
@@ -803,11 +1067,13 @@ function initializeCompleteRecorder() {
       showElementInfo(el) {
         const rect = el.getBoundingClientRect();
         const xpath = RecorderModules.XPathGenerator.generateXPath(el);
+        const frameInfo = this.getElementFrame(el);
         const info = document.getElementById('recorder-element-info');
 
         if (info) {
           info.innerHTML = `
         <strong>Tag:</strong> ${el.tagName.toLowerCase()}<br>
+        <strong>Frame:</strong> ${frameInfo}<br>
         <strong>XPath:</strong> <span style="font-family: monospace; font-size: 10px;">${xpath}</span><br>
         ${el.id ? `<strong>ID:</strong> ${el.id}<br>` : ''}
         ${el.className ? `<strong>Class:</strong> ${el.className.split(' ').slice(0, 2).join(' ')}<br>` : ''}
@@ -828,7 +1094,6 @@ function initializeCompleteRecorder() {
       },
 
       _ignoreElement(el) {
-        // Check if element is part of the recorder UI
         const isRecorderElement = el.closest('#enhanced-test-recorder-container');
 
         if (isRecorderElement) {
@@ -917,7 +1182,7 @@ Please try:
         steps.forEach(step => {
           if (step.xpath) {
             const elementName = this.generateElementName(step);
-            elementMap.set(elementName, step.xpath);
+            elementMap.set(elementName, { xpath: step.xpath, frame: step.frame || 'main' });
           }
         });
 
@@ -925,20 +1190,43 @@ Please try:
 
 import com.codeborne.selenide.SelenideElement;
 import static com.codeborne.selenide.Selenide.$x;
+import static com.codeborne.selenide.Selenide.switchTo;
 
 /**
  * Page Elements - Generated by Enhanced Test Automation Recorder (Selenide)
  * Generated on: ${new Date().toISOString()}
  * Total elements: ${elementMap.size}
  * Total steps: ${steps.length}
+ * Supports multiple frames: ${steps.some(s => s.frame && s.frame !== 'main') ? 'Yes' : 'No'}
  */
 public class PageElements {
     
 `;
 
-        elementMap.forEach((xpath, elementName) => {
-          javaCode += `    /** XPath: ${xpath} */\n`;
-          javaCode += `    public final SelenideElement ${elementName} = $x("${xpath}");\n\n`;
+        elementMap.forEach((elementInfo, elementName) => {
+          const { xpath, frame } = elementInfo;
+          javaCode += `    /** XPath: ${xpath}${frame !== 'main' ? ` | Frame: ${frame}` : ''} */\n`;
+          
+          if (frame !== 'main') {
+            javaCode += `    public SelenideElement ${elementName}() {\n`;
+            javaCode += `        switchTo().frame("${frame}");\n`;
+            javaCode += `        return $x("${xpath}");\n`;
+            javaCode += `    }\n\n`;
+          } else {
+            javaCode += `    public final SelenideElement ${elementName} = $x("${xpath}");\n\n`;
+          }
+        });
+
+        javaCode += `    // Frame switching utilities\n`;
+        javaCode += `    public void switchToMainFrame() {\n`;
+        javaCode += `        switchTo().defaultContent();\n`;
+        javaCode += `    }\n\n`;
+        
+        const frames = [...new Set(steps.filter(s => s.frame && s.frame !== 'main').map(s => s.frame))];
+        frames.forEach(frameName => {
+          javaCode += `    public void switchTo${this.toCamelCase(frameName)}Frame() {\n`;
+          javaCode += `        switchTo().frame("${frameName}");\n`;
+          javaCode += `    }\n\n`;
         });
 
         javaCode += `}`;
@@ -963,14 +1251,17 @@ import static com.codeborne.selenide.Condition.*;
 import static com.codeborne.selenide.Selenide.*;
 import pageObjects.PageElements;
 import java.time.Duration;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * Step Definitions - Generated by Enhanced Test Automation Recorder (Selenide)
  * Generated on: ${new Date().toISOString()}
  * Total steps: ${steps.length}
  * Total methods: ${stepMethods.size}
+ * Multi-frame support: ${steps.some(s => s.frame && s.frame !== 'main') ? 'Enabled' : 'Disabled'}
  */
-public class StepDefinitions extends PageElements{
+public class StepDefinitions extends PageElements {
 
     private static Map<String, String> storeValue = new HashMap<>();
 
@@ -990,7 +1281,7 @@ public class StepDefinitions extends PageElements{
 Feature: Recorded user interactions
 
   @SmokeTest
-   Scenario Outline:  ${stepText}
+   Scenario Outline: ${stepText}
     Given user is on the target page
 ${steps.filter(step => step.action && step.xpath).map(step => `    When ${this.generateStepDescription(step)}`).join('\n')}
 
@@ -1000,6 +1291,7 @@ ${steps.filter(step => step.action && step.xpath).map(step => `    When ${this.g
 
 # Generated from ${steps.length} recorded steps
 # Generated on: ${new Date().toISOString()}
+# Frames used: ${[...new Set(steps.map(s => s.frame || 'main'))].join(', ')}
 `;
 
         return featureFile;
@@ -1021,7 +1313,8 @@ ${steps.filter(step => step.action && step.xpath).map(step => `    When ${this.g
         for (const pattern of patterns) {
           const match = step.xpath?.match(pattern.regex);
           if (match && match[1]) {
-            const elementName = this.toCamelCase(match[1]) + pattern.suffix;
+            const baseName = this.toCamelCase(match[1]);
+            const elementName = baseName + pattern.suffix;
             return elementName;
           }
         }
@@ -1036,72 +1329,80 @@ ${steps.filter(step => step.action && step.xpath).map(step => `    When ${this.g
 
       generateStepDefinition(step, methodName) {
         const elementName = this.generateElementName(step);
+        const hasFrame = step.frame && step.frame !== 'main';
 
         const templates = {
           click: {
             annotation: `@When("User clicks on ${elementName}")`,
             signature: `public void ${methodName}()`,
-            body: `        // Wait for element to be visible and enabled (50 seconds timeout)
-        PageElements.${elementName}.shouldBe(visible,  Duration.ofSeconds(50));
+            body: `        ${hasFrame ? `// Switch to frame: ${step.frame}\n        switchTo().frame("${step.frame}");\n        ` : ''}// Wait for element to be visible and enabled (50 seconds timeout)
+        ${hasFrame ? `${elementName}()` : `${elementName}`}.shouldBe(visible, Duration.ofSeconds(50));
         
         try {
             // Try JavaScript click first
-            Object jsResult = Selenide.executeJavaScript("try { arguments[0].click(); return true; } catch(e) { return false; }", PageElements.${elementName});
+            Object jsResult = executeJavaScript("try { arguments[0].click(); return true; } catch(e) { return false; }", ${hasFrame ? `${elementName}()` : `${elementName}`});
             
             if (Boolean.TRUE.equals(jsResult)) {
                 System.out.println("✅ Clicked on ${elementName} using JavaScript");
             } else {
                 // JavaScript click failed, use Selenide click as fallback
                 System.out.println("⚠️ JavaScript click failed for ${elementName}, trying Selenide click...");
-                PageElements.${elementName}.click();
+                ${hasFrame ? `${elementName}()` : `${elementName}`}.click();
                 System.out.println("✅ Clicked on ${elementName} using Selenide click");
             }
+        } finally {
+            ${hasFrame ? `// Switch back to main content\n            switchTo().defaultContent();` : ''}
         }`
           },
           sendKeys: {
             annotation: `@When("User enters {string} in ${elementName}")`,
             signature: `public void ${methodName}(String text)`,
-            body: `        PageElements.${elementName}.shouldBe(visible, Duration.ofSeconds(50)).setValue(text);
-        System.out.println("✅ Entered text '" + text + "' in ${elementName}");`
+            body: `        ${hasFrame ? `// Switch to frame: ${step.frame}\n        switchTo().frame("${step.frame}");\n        ` : ''}try {
+            ${hasFrame ? `${elementName}()` : `${elementName}`}.shouldBe(visible, Duration.ofSeconds(50)).setValue(text);
+            System.out.println("✅ Entered text '" + text + "' in ${elementName}");
+        } finally {
+            ${hasFrame ? `// Switch back to main content\n            switchTo().defaultContent();` : ''}
+        }`
           },
           save: {
             annotation: `@When("User saves value from ${elementName} in {string}")`,
             signature: `public void ${methodName}(String data)`,
-            body: `        String value = PageElements.${elementName}.shouldBe(visible,Duration.ofSeconds(50)).getText();
-        storeValue.put(data,value);
-        System.out.println("✅ Saved value: " + value + " from ${elementName}");`
+            body: `        ${hasFrame ? `// Switch to frame: ${step.frame}\n        switchTo().frame("${step.frame}");\n        ` : ''}try {
+            String value = ${hasFrame ? `${elementName}()` : `${elementName}`}.shouldBe(visible, Duration.ofSeconds(50)).getText();
+            storeValue.put(data, value);
+            System.out.println("✅ Saved value: " + value + " from ${elementName}");
+        } finally {
+            ${hasFrame ? `// Switch back to main content\n            switchTo().defaultContent();` : ''}
+        }`
           },
           verify: {
             annotation: `@Then("User verifies {string} in ${elementName}")`,
             signature: `public void ${methodName}(String expectedText)`,
-            body: `
-        String text;
-        if (storeValue.containsKey(expectedText)) {
-            text = storeValue.get(expectedText);
-        } else {
-            text = expectedText;
-        }
-        for (SelenideElement element : PageElements.${elementName}) {
-            element.shouldBe(visible, Duration.ofSeconds(50));
-            if (element.getText().contains(text)) {
-                System.out.println("✅ Verified text '" + text + "' in ${elementName}");
-                break;
+            body: `        ${hasFrame ? `// Switch to frame: ${step.frame}\n        switchTo().frame("${step.frame}");\n        ` : ''}try {
+            String text;
+            if (storeValue.containsKey(expectedText)) {
+                text = storeValue.get(expectedText);
+            } else {
+                text = expectedText;
             }
-        }
-        if (!matchFound) {
-            throw new AssertionError("❌ Text '" + text + "' not found in any element of ${elementName}");
-        }
-    `
+            ${hasFrame ? `${elementName}()` : `${elementName}`}.shouldBe(visible, Duration.ofSeconds(50)).shouldHave(text(text));
+            System.out.println("✅ Verified text '" + text + "' in ${elementName}");
+        } finally {
+            ${hasFrame ? `// Switch back to main content\n            switchTo().defaultContent();` : ''}
+        }`
           }
-
         };
 
         const template = templates[step.action] || {
           annotation: `@When("User performs ${step.action} on ${elementName}")`,
           signature: `public void ${methodName}()`,
-          body: `        // TODO: Implement '${step.action}' for ${elementName}
-        PageElements.${elementName}.shouldBe(visible);
-        System.out.println("⚠️ Action '${step.action}' needs implementation for ${elementName}");`
+          body: `        ${hasFrame ? `// Switch to frame: ${step.frame}\n        switchTo().frame("${step.frame}");\n        ` : ''}try {
+            // TODO: Implement '${step.action}' for ${elementName}
+            ${hasFrame ? `${elementName}()` : `${elementName}`}.shouldBe(visible);
+            System.out.println("⚠️ Action '${step.action}' needs implementation for ${elementName}");
+        } finally {
+            ${hasFrame ? `// Switch back to main content\n            switchTo().defaultContent();` : ''}
+        }`
         };
 
         return `    ${template.annotation}
@@ -1117,13 +1418,15 @@ ${template.body}
 
       generateStepDescription(step) {
         const elementName = this.generateElementName(step);
+        const frameText = step.frame && step.frame !== 'main' ? ` in ${step.frame} frame` : '';
+        
         const descriptions = {
-          click: `user clicks on ${elementName}`,
-          sendKeys: `user enters "${step.data || '{text}'}" in ${elementName}`,
-          save: `user saves value from ${elementName} in "${step.data}`,
-          verify: `user verifies "${step.data || '{text}'}" in ${elementName}`
+          click: `user clicks on ${elementName}${frameText}`,
+          sendKeys: `user enters "${step.data || '{text}'}" in ${elementName}${frameText}`,
+          save: `user saves value from ${elementName}${frameText} in "${step.data}"`,
+          verify: `user verifies "${step.data || '{text}'}" in ${elementName}${frameText}`
         };
-        return descriptions[step.action] || `user performs ${step.action} on ${elementName}`;
+        return descriptions[step.action] || `user performs ${step.action} on ${elementName}${frameText}`;
       },
 
       toCamelCase(str) {
@@ -1224,6 +1527,8 @@ ${template.body}
     },
   };
 
+  // Initialize Frame Handler
+  const frameHandler = RecorderModules.FrameHandler.init();
 
   // Create recorder UI
   createRecorderUI();
@@ -1235,15 +1540,18 @@ ${template.body}
   const actionsHandler = RecorderModules.ActionsHandler.init(window.recorderState, ui);
   const exportHandler = RecorderModules.ExportHandler.init(window.recorderState, ui);
 
+  // Store UI globally for frame access
+  window.recorderUI = ui;
+
   // Bind UI events with proper pause/resume logic
   bindUIEvents(ui, actionsHandler, exportHandler);
 
   // Show welcome message
   showWelcomeMessage(ui);
 
-  console.log('✅ Complete Test Recorder initialized successfully!');
+  console.log('✅ Enhanced Test Recorder initialized successfully with frame support!');
 
-  // Enhanced UI functions with step management features
+  // Enhanced UI functions remain the same...
   function createRecorderUI() {
     const container = document.createElement('div');
     container.id = 'enhanced-test-recorder-container';
@@ -1262,7 +1570,7 @@ ${template.body}
     container.innerHTML = `
       <div style="text-align: center; margin-bottom: 10px; padding-bottom: 10px; background-color: #002f6c; color: white; margin: -30px -30px 10px -30px; padding: 15px 30px; border-radius: 16px 16px 0 0; cursor: move; user-select: none;">
   <h1 style="color: white; font-size: 20px; font-weight: 600; margin-bottom: 2px;">Enhanced Test Recorder</h1>
-  <p style="color: #e0e0e0; font-size: 12px; margin: 0;">Advanced Step Management & BDD Generation</p>
+  <p style="color: #e0e0e0; font-size: 12px; margin: 0;">Frame Support • Precise XPath • Smart Input Tracking</p>
 </div>
 <div id="recorderContent" style="transition: all 0.3s ease;">
   <div style="margin-bottom: 10px;">
@@ -1288,7 +1596,7 @@ ${template.body}
           </div>
         </div>
         <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 8px; margin-top: 15px; text-align: center; color: #856404; font-size: 10px;">
-          💡 <strong>Features:</strong> Double-click to edit • Drag to reorder • Hover between steps to delete • Restricted action dropdown
+          💡 <strong>New Features:</strong> Frame detection • Precise element targeting • Smart input deduplication • Alt+Click to save values
         </div>
       </div>
       <button id="minimizeRecorder" style="position: absolute; top: 10px; left: 10px; background: rgba(52, 152, 219, 0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease;" title="Minimize">−</button>
@@ -1340,7 +1648,7 @@ ${template.body}
         if (window.recorderState.steps.length === 0) {
           this.stepsContent.innerHTML = `
             <div style="text-align: center; padding: 30px 12px; color: #7f8c8d;">
-              <div style="font-size: 32px; margin-bottom: 10px; opacity: 0.5;"></div>
+              <div style="font-size: 32px; margin-bottom: 10px; opacity: 0.5;">🎬</div>
               <h3 style="font-size: 14px; margin-bottom: 5px;">No steps recorded yet</h3>
               <p style="font-size: 11px;">Click "Start" and interact with elements</p>
             </div>
@@ -1355,8 +1663,9 @@ ${template.body}
                 <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 40px;"></th>
                 <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 40px;">#</th>
                 <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px;">XPath</th>
-                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 100px;">Action</th>
-                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 120px;">Data</th>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 80px;">Action</th>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 100px;">Data</th>
+                <th style="background: #f8f9fa; padding: 8px 4px; text-align: left; font-weight: 600; color: #495057; border-bottom: 2px solid #e0e0e0; font-size: 10px; width: 60px;">Frame</th>
               </tr>
             </thead>
             <tbody id="stepsTableBody">
@@ -1370,6 +1679,9 @@ ${template.body}
       },
 
       generateStepRow(step, index) {
+        const frameDisplay = step.frame && step.frame !== 'main' ? step.frame : '—';
+        const frameColor = step.frame && step.frame !== 'main' ? '#ff6b6b' : '#6c757d';
+        
         return `
           <tr class="step-row" data-step-index="${index}" draggable="true" style="transition: all 0.3s ease;">
             <td style="padding: 6px 4px; border-bottom: 1px solid #e0e0e0; text-align: center;">
@@ -1395,9 +1707,11 @@ ${template.body}
                 data-field="data" 
                 data-step-index="${index}" 
                 title="Double-click to edit">${step.data || '—'}</td>
+            <td style="padding: 6px 4px; border-bottom: 1px solid #e0e0e0; color: ${frameColor}; font-size: 9px; font-weight: 500;" 
+                title="Frame: ${step.frame || 'main'}">${frameDisplay}</td>
           </tr>
           <tr class="control-zone-row" data-after-index="${index}">
-            <td colspan="5" style="height: 3px; padding: 0; border: none; background: transparent; position: relative; transition: all 0.3s ease;" 
+            <td colspan="6" style="height: 3px; padding: 0; border: none; background: transparent; position: relative; transition: all 0.3s ease;" 
                 class="control-zone" 
                 data-step-index="${index}" 
                 title="Hover for controls"></td>
@@ -1423,7 +1737,6 @@ ${template.body}
       },
 
       makeFieldEditable(field) {
-        // Prevent multiple edits
         if (field.classList.contains('editing')) return;
 
         const stepIndex = parseInt(field.dataset.stepIndex);
@@ -1436,7 +1749,6 @@ ${template.body}
         let inputElement;
 
         if (fieldType === 'action') {
-          // Create dropdown for action field
           inputElement = document.createElement('select');
           inputElement.style.cssText = `
             width: 100%; padding: 4px; border: 2px solid #667eea; border-radius: 3px; 
@@ -1453,7 +1765,6 @@ ${template.body}
             inputElement.appendChild(option);
           });
         } else {
-          // Create input/textarea for other fields
           inputElement = document.createElement(fieldType === 'xpath' ? 'textarea' : 'input');
           inputElement.value = currentValue;
           inputElement.style.cssText = `
@@ -1478,7 +1789,6 @@ ${template.body}
             saveState();
           }
 
-          // Restore display mode
           field.classList.remove('editing');
           field.classList.add('display-mode');
 
@@ -1546,12 +1856,10 @@ ${template.body}
 
           const targetIndex = parseInt(targetRow.dataset.stepIndex);
 
-          // Reorder steps in the state
           const draggedStep = window.recorderState.steps[draggedIndex];
           window.recorderState.steps.splice(draggedIndex, 1);
           window.recorderState.steps.splice(targetIndex, 0, draggedStep);
 
-          // Update step IDs to maintain sequence
           window.recorderState.steps.forEach((step, index) => {
             step.id = index + 1;
           });
@@ -1560,7 +1868,6 @@ ${template.body}
           this.updateStepsDisplay();
         });
 
-        // Show drag handle on hover
         const stepRows = tbody.querySelectorAll('.step-row');
         stepRows.forEach(row => {
           const dragHandle = row.querySelector('.drag-handle');
@@ -1609,7 +1916,6 @@ ${template.body}
           </div>
         `;
 
-        // Add event listeners to buttons
         const deleteBtn = zone.querySelector('.delete-btn');
         const addBtn = zone.querySelector('.add-btn');
 
@@ -1623,7 +1929,6 @@ ${template.body}
           this.addStepAbove(stepIndex);
         });
 
-        // Add hover effects
         deleteBtn.addEventListener('mouseenter', () => {
           deleteBtn.style.background = '#c82333';
           deleteBtn.style.transform = 'scale(1.05)';
@@ -1655,7 +1960,6 @@ ${template.body}
         if (confirm(`Delete step ${step.id}: ${step.action} on ${step.xpath?.substring(0, 50)}...?`)) {
           window.recorderState.steps.splice(stepIndex, 1);
 
-          // Update step IDs to maintain sequence
           window.recorderState.steps.forEach((step, index) => {
             step.id = index + 1;
           });
@@ -1667,22 +1971,19 @@ ${template.body}
 
       addStepAbove(stepIndex) {
         const newStep = {
-          id: 0, // Will be updated when renumbering
+          id: 0,
           xpath: '//input[@placeholder="Enter XPath"]',
           action: 'click',
           data: '',
           element: 'INPUT',
+          frame: 'main',
           timestamp: new Date().toISOString(),
           isManual: true
         };
 
-        // Insert the new step at the specified position
         window.recorderState.steps.splice(stepIndex, 0, newStep);
-
-        // Update step counter
         window.recorderState.stepCounter++;
 
-        // Update step IDs to maintain sequence
         window.recorderState.steps.forEach((step, index) => {
           step.id = index + 1;
         });
@@ -1690,7 +1991,6 @@ ${template.body}
         saveState();
         this.updateStepsDisplay();
 
-        // Automatically edit the new step's XPath
         setTimeout(() => {
           const newStepRow = this.stepsContent.querySelector(`[data-step-index="${stepIndex}"] .xpath-editable`);
           if (newStepRow) {
@@ -1711,7 +2011,7 @@ ${template.body}
   }
 
   function bindUIEvents(ui, actionsHandler, exportHandler) {
-    // FIXED START/RESUME BUTTON HANDLER
+    // START/RESUME BUTTON HANDLER
     ui.startBtn.onclick = function () {
       console.log('🟢 START/RESUME button clicked');
       console.log('Current state before click:', {
@@ -1721,15 +2021,11 @@ ${template.body}
         steps: window.recorderState.steps.length
       });
 
-      // Check if we're resuming from pause
       if (window.recorderState.isPaused && window.recorderState.sessionStarted) {
-        // RESUME from pause - keep all existing data
         console.log('📤 RESUMING from pause - preserving existing steps');
         window.recorderState.isRecording = true;
         window.recorderState.isPaused = false;
-        // DO NOT reset steps or stepCounter
       } else {
-        // START new session
         console.log('🆕 STARTING new recording session');
         window.recorderState.steps = [];
         window.recorderState.stepCounter = 0;
@@ -1738,7 +2034,6 @@ ${template.body}
         window.recorderState.sessionStarted = true;
       }
 
-      // Update UI
       ui.startBtn.disabled = true;
       ui.startBtn.style.opacity = '0.6';
       ui.startBtn.textContent = '🔴 Recording...';
@@ -1760,29 +2055,25 @@ ${template.body}
       ui.updateMiniStatus();
     };
 
-    // FIXED PAUSE BUTTON HANDLER - Two-click behavior: Pause → Reset
+    // PAUSE/RESET BUTTON HANDLER
     ui.pauseBtn.onclick = function () {
       console.log('⏸️ PAUSE button clicked');
       console.log('Current state before pause:', window.recorderState);
 
-      // First click: PAUSE (if currently recording)
       if (window.recorderState.isRecording && !window.recorderState.isPaused) {
         console.log('📥 FIRST CLICK - Pausing recording');
 
-        // PAUSE - preserve all data
         window.recorderState.isRecording = false;
         window.recorderState.isPaused = true;
-        // Keep sessionStarted = true (so we know this is a pause, not a stop)
 
-        // Update UI for pause state
         ui.startBtn.disabled = false;
         ui.startBtn.style.opacity = '1';
         ui.startBtn.textContent = '▶️ Resume';
 
         ui.pauseBtn.disabled = false;
         ui.pauseBtn.style.opacity = '1';
-        ui.pauseBtn.textContent = '🔄 Reset';  // CHANGE TO RESET TEXT
-        ui.pauseBtn.style.background = '#e74c3c';  // Red color for reset
+        ui.pauseBtn.textContent = '🔄 Reset';
+        ui.pauseBtn.style.background = '#e74c3c';
 
         ui.exportBtn.disabled = false;
         ui.exportBtn.style.opacity = '1';
@@ -1795,31 +2086,26 @@ ${template.body}
         saveState();
         ui.updateMiniStatus();
 
-      }
-      // Second click: RESET (if currently paused)
-      else if (window.recorderState.isPaused) {
+      } else if (window.recorderState.isPaused) {
         console.log('🔄 SECOND CLICK - Resetting all data');
 
-        // Confirm reset
         if (window.recorderState.steps.length > 0) {
           if (!confirm(`Reset will permanently clear all ${window.recorderState.steps.length} recorded steps. Continue?`)) {
             return;
           }
         }
 
-        // Reset everything
         window.recorderState = createDefaultState();
         saveState();
 
-        // Update UI to initial state
         ui.startBtn.disabled = false;
         ui.startBtn.style.opacity = '1';
         ui.startBtn.textContent = '🔴 Start';
 
         ui.pauseBtn.disabled = true;
         ui.pauseBtn.style.opacity = '0.6';
-        ui.pauseBtn.textContent = '⏸️ Pause';  // Back to pause text
-        ui.pauseBtn.style.background = '#f39c12';  // Back to orange
+        ui.pauseBtn.textContent = '⏸️ Pause';
+        ui.pauseBtn.style.background = '#f39c12';
 
         ui.exportBtn.disabled = true;
         ui.exportBtn.style.opacity = '0.6';
@@ -1843,7 +2129,7 @@ ${template.body}
       exportHandler.exportFiles();
     };
 
-    // Close recorder - FIXED
+    // Close recorder
     ui.closeBtn.onclick = function (e) {
       console.log('❌ Close recorder clicked');
       e.preventDefault();
@@ -1857,10 +2143,8 @@ ${template.body}
 
       console.log('🗑️ Removing recorder elements...');
 
-      // Remove event listeners first
       actionsHandler.removeEvents();
 
-      // Remove UI elements
       const container = document.getElementById('enhanced-test-recorder-container');
       const highlighter = document.getElementById('recorder-highlighter');
       const elementInfo = document.getElementById('recorder-element-info');
@@ -1869,7 +2153,6 @@ ${template.body}
       if (highlighter) highlighter.remove();
       if (elementInfo) elementInfo.remove();
 
-      // Clear saved state
       sessionStorage.removeItem('testRecorderState');
 
       console.log('✅ Recorder closed successfully');
@@ -1921,8 +2204,8 @@ ${template.body}
       ui.startBtn.textContent = '▶️ Resume';
       ui.pauseBtn.disabled = false;
       ui.pauseBtn.style.opacity = '1';
-      ui.pauseBtn.textContent = '🔄 Reset';  // Show reset when paused
-      ui.pauseBtn.style.background = '#e74c3c';  // Red color for reset
+      ui.pauseBtn.textContent = '🔄 Reset';
+      ui.pauseBtn.style.background = '#e74c3c';
       ui.exportBtn.disabled = false;
       ui.exportBtn.style.opacity = '1';
       ui.statusBar.style.background = '#fff3cd';
@@ -1934,14 +2217,13 @@ ${template.body}
       ui.startBtn.textContent = '🔴 Recording...';
       ui.pauseBtn.disabled = false;
       ui.pauseBtn.style.opacity = '1';
-      ui.pauseBtn.textContent = '⏸️ Pause';  // Show pause when recording
-      ui.pauseBtn.style.background = '#f39c12';  // Orange for pause
+      ui.pauseBtn.textContent = '⏸️ Pause';
+      ui.pauseBtn.style.background = '#f39c12';
       ui.statusBar.style.background = '#d4edda';
       ui.statusBar.style.color = '#155724';
       ui.statusBar.textContent = '🔴 Recording interactions...';
     }
 
-    // Update display with restored steps
     ui.updateStepsDisplay();
     ui.updateMiniStatus();
   }
@@ -1954,7 +2236,6 @@ ${template.body}
     const header = ui.container.querySelector('div:first-child');
     const container = ui.container;
 
-    // Set initial position if not already set
     if (!container.style.left && !container.style.top) {
       container.style.position = 'fixed';
       container.style.left = '20px';
@@ -1966,26 +2247,21 @@ ${template.body}
     document.addEventListener('mouseup', endDrag);
 
     function startDrag(e) {
-      // Ignore if clicking on buttons
       if (e.target === ui.minimizeBtn || e.target === ui.closeBtn) return;
 
-      // Only start drag if clicking on header
       if (e.target === header || header.contains(e.target)) {
         isDragging = true;
 
-        // Get initial mouse position
         startX = e.clientX;
         startY = e.clientY;
 
-        // Get current element position
         const rect = container.getBoundingClientRect();
         offsetX = startX - rect.left;
         offsetY = startY - rect.top;
 
-        // Add active styling
         container.style.cursor = 'grabbing';
         container.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.3)';
-        container.style.transition = 'none'; // Disable transitions during drag
+        container.style.transition = 'none';
 
         e.preventDefault();
       }
@@ -1994,11 +2270,9 @@ ${template.body}
     function drag(e) {
       if (!isDragging) return;
 
-      // Calculate new position
       let newX = e.clientX - offsetX;
       let newY = e.clientY - offsetY;
 
-      // Constrain to viewport boundaries
       const rect = container.getBoundingClientRect();
       const maxX = window.innerWidth - rect.width;
       const maxY = window.innerHeight - rect.height;
@@ -2006,7 +2280,6 @@ ${template.body}
       newX = Math.max(0, Math.min(newX, maxX));
       newY = Math.max(0, Math.min(newY, maxY));
 
-      // Apply new position
       container.style.left = `${newX}px`;
       container.style.top = `${newY}px`;
 
@@ -2018,13 +2291,11 @@ ${template.body}
 
       isDragging = false;
 
-      // Restore styling
       container.style.cursor = '';
       container.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.15)';
       container.style.transition = 'all 0.3s ease';
     }
 
-    // Handle window resize to keep container in bounds
     window.addEventListener('resize', () => {
       const rect = container.getBoundingClientRect();
       const maxX = window.innerWidth - rect.width;
@@ -2060,7 +2331,7 @@ ${template.body}
     } else {
       ui.statusBar.style.background = '#d1ecf1';
       ui.statusBar.style.color = '#0c5460';
-      ui.statusBar.textContent = '🎉 Recorder loaded! Click Start to begin recording.';
+      ui.statusBar.textContent = '🎉 Enhanced Recorder loaded! Multi-frame support enabled.';
 
       setTimeout(() => {
         ui.statusBar.style.background = '#e2e3e5';
@@ -2078,6 +2349,8 @@ ${template.body}
     console.log('sessionStarted:', window.recorderState?.sessionStarted);
     console.log('steps:', window.recorderState?.steps?.length);
     console.log('stepCounter:', window.recorderState?.stepCounter);
+    console.log('frames:', window.recorderState?.frameMap?.size);
+    console.log('currentFrame:', window.recorderState?.currentFrame);
     console.log('Full state:', window.recorderState);
     return window.recorderState;
   };
@@ -2088,6 +2361,29 @@ ${template.body}
     window.recorderState.sessionStarted = true;
     console.log('✅ Manually set recording state to true');
     return window.recorderState;
+  };
+
+  window.debugFrames = function () {
+    console.log('🖼️ Frame Information:');
+    console.log('Frame Map:', window.recorderState?.frameMap);
+    console.log('Current Frame:', window.recorderState?.currentFrame);
+    
+    const frames = document.querySelectorAll('iframe, frame');
+    console.log(`Found ${frames.length} frames on page`);
+    
+    frames.forEach((frame, index) => {
+      const name = frame.name || frame.id || `frame_${index}`;
+      console.log(`Frame ${index}: ${name}`, {
+        src: frame.src,
+        accessible: RecorderModules.FrameHandler.isAccessibleFrame(frame.contentWindow)
+      });
+    });
+    
+    return {
+      frameMap: window.recorderState?.frameMap,
+      currentFrame: window.recorderState?.currentFrame,
+      totalFrames: frames.length
+    };
   };
 }
 
