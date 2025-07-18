@@ -1298,29 +1298,52 @@ ${steps.filter(step => step.action && step.xpath).map(step => `    When ${this.g
       },
 
       generateElementName(step) {
-        const patterns = [
-          { regex: /@data-field-label="([^"]+)"/, suffix: 'Field', priority: 1 },
-          { regex: /@placeholder="([^"]+)"/, suffix: 'Field', priority: 2 },
-          { regex: /@aria-label="([^"]+)"/, suffix: 'Element', priority: 3 },
-          { regex: /@name="([^"]+)"/, suffix: 'Element', priority: 4 },
-          { regex: /normalize-space\(text\(\)\)="([^"]+)"/, suffix: 'Button', priority: 5 },
-          { regex: /@title="([^"]+)"/, suffix: 'Element', priority: 6 },
-          { regex: /@data-testid="([^"]+)"/, suffix: 'Element', priority: 7 }
-        ];
+  const suffixMap = {
+    'data-field-label': 'Field',
+    'placeholder': 'Field',
+    'aria-label': 'Element',
+    'aria-labelledby': 'Element',
+    'data-testid': 'Element',
+    'name': 'Field',
+    'id': 'Element',
+    'title': 'Element',
+    'alt': 'Image',
+    'role': 'Role',
+    'text()': 'Button',
+    'normalize-space(text())': 'Button'
+  };
 
-        patterns.sort((a, b) => a.priority - b.priority);
+  // Match all attribute="value" or text()="value" patterns
+  const regex = /@?([\w-]+|\btext\(\)|normalize-space\(text\(\)\))\s*=\s*"([^"]+)"/g;
 
-        for (const pattern of patterns) {
-          const match = step.xpath?.match(pattern.regex);
-          if (match && match[1]) {
-            const baseName = this.toCamelCase(match[1]);
-            const elementName = baseName + pattern.suffix;
-            return elementName;
-          }
-        }
+  let match;
+  const matches = [];
 
-        return `element${step.id}`;
-      },
+  while ((match = regex.exec(step.xpath)) !== null) {
+    const attr = match[1];
+    const value = match[2];
+    const suffix = suffixMap[attr] || 'Element';
+    matches.push({ value, suffix, priority: Object.keys(suffixMap).indexOf(attr) });
+  }
+
+  // Pick the best match by priority
+  if (matches.length > 0) {
+    matches.sort((a, b) => a.priority - b.priority);
+    const baseName = this.toCamelCase(matches[0].value);
+    return baseName + matches[0].suffix;
+  }
+
+  // Fallback
+  return (step.tagName?.toLowerCase() || 'element') + step.id;
+},
+
+toCamelCase(str) {
+  return str
+    .replace(/[^a-zA-Z0-9 ]/g, '')                   // Remove special chars
+    .replace(/\s+(.)(\w*)/g, (_, first, rest) =>
+      first.toUpperCase() + rest.toLowerCase())     // CamelCase
+    .replace(/^./, first => first.toLowerCase());    // Lowercase first
+},
 
       generateMethodName(step) {
         const elementName = this.generateElementName(step);
